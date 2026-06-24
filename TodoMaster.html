@@ -10,6 +10,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TodoMaster">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
     <script>
       if ('serviceWorker' in navigator) {
@@ -18,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.4 - 任務管理工具</title>
+    <title>TodoMaster v4.4.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -787,7 +789,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.4';
+        const APP_VERSION = 'v4.4.1';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
