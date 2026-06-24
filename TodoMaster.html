@@ -18,7 +18,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.3 - 任務管理工具</title>
+    <title>TodoMaster v4.4 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -787,7 +787,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.3';
+        const APP_VERSION = 'v4.4';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1335,7 +1335,6 @@
                     this.setupEventListeners();
                     this.setupBackupListeners();
                     this.updateUI();
-                    this.initDragAndDrop();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
                     this.autoImportFromSyncFolder();
@@ -2288,7 +2287,7 @@
                 }
                 document.querySelector(`input[name="dateMode"][value="${dateMode}"]`).checked = true;
                 document.getElementById('taskDate').value = task.date || '';
-                document.getElementById('taskDate').style.display = dateMode === 'scheduled' ? 'block' : 'none';
+                document.getElementById('dateInputGroup').style.display = dateMode === 'scheduled' ? 'block' : 'none';
 
                 // 設置預計時間和 blocks
                 document.querySelector(`input[name="estimatedTime"][value="${task.estimatedTime}"]`).checked = true;
@@ -2407,18 +2406,6 @@
             }
 
 
-            saveGroupTaskOrder(taskList, groupId) {
-                const taskItems = taskList.querySelectorAll('.task-item');
-                taskItems.forEach((item, index) => {
-                    const taskId = item.dataset.taskId;
-                    const task = this.getTaskById(taskId);
-                    if (task && task.groupId === groupId) {
-                        task.groupOrder = index + 1;
-                    }
-                });
-                this.saveToStorage();
-            }
-
             openCompleteTimeModal(taskId, checkbox, isBlockCompletion = false) {
                 const task = this.getTaskById(taskId);
                 if (!task) return;
@@ -2469,11 +2456,9 @@
                 };
 
                 // 回車鍵確認
-                document.getElementById('completeTimeInput').addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        document.getElementById('confirmCompleteBtn').click();
-                    }
-                });
+                document.getElementById('completeTimeInput').onkeypress = (e) => {
+                    if (e.key === 'Enter') document.getElementById('confirmCompleteBtn').click();
+                };
 
                 // 保存原始複選框狀態，以便用戶取消時恢復
                 const originalModal = document.getElementById('completeTimeModal');
@@ -2728,25 +2713,24 @@
 
             setupQuickDateButtons() {
                 const today = new Date();
-                const getDateString = (date) => localDateStr(date);
 
                 // 今天
                 document.getElementById('todayBtn').onclick = () => {
-                    document.getElementById('taskDate').value = getDateString(today);
+                    document.getElementById('taskDate').value = localDateStr(today);
                 };
 
                 // 明天
                 document.getElementById('tomorrowBtn').onclick = () => {
                     const date = new Date(today);
                     date.setDate(date.getDate() + 1);
-                    document.getElementById('taskDate').value = getDateString(date);
+                    document.getElementById('taskDate').value = localDateStr(date);
                 };
 
                 // 後天
                 document.getElementById('dayAfterBtn').onclick = () => {
                     const date = new Date(today);
                     date.setDate(date.getDate() + 2);
-                    document.getElementById('taskDate').value = getDateString(date);
+                    document.getElementById('taskDate').value = localDateStr(date);
                 };
 
                 // 下週各日
@@ -3506,10 +3490,6 @@
                 this.updateUI();
             }
 
-            initDragAndDrop() {
-                // 由 renderTasks 處理
-            }
-
             getGroupsList() {
                 const groups = {};
                 this.tasks.forEach(task => {
@@ -3528,12 +3508,6 @@
                 });
                 return Object.values(groups);
             }
-
-        getTasksByGroup(groupId) {
-            return this.tasks
-                .filter(task => task.groupId === groupId)
-                .sort((a, b) => (a.groupOrder || 0) - (b.groupOrder || 0));
-        }
 
         updateGroupTaskDates(groupId) {
             // 只重算未完成的任務，已完成任務保留原日期作為歷史記錄
