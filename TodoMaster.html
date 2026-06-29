@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.4.1 - 任務管理工具</title>
+    <title>TodoMaster v4.5 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -789,7 +789,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.4.1';
+        const APP_VERSION = 'v4.5';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1009,16 +1009,12 @@
                         </label>
                     </div>
                     <div id="blockSelectGroup" style="display: none; margin-top: 12px;">
-                        <label>選擇 block 數量</label>
-                        <select id="blockSelect">
-                            <option value="2">2 blocks (60 分鐘)</option>
-                            <option value="3">3 blocks (90 分鐘)</option>
-                            <option value="4">4 blocks (120 分鐘)</option>
-                            <option value="5">5 blocks (150 分鐘)</option>
-                            <option value="6">6 blocks (180 分鐘)</option>
-                            <option value="8">8 blocks (240 分鐘)</option>
-                            <option value="10">10 blocks (300 分鐘)</option>
-                        </select>
+                        <label>Block 數量（每 block = 30 分鐘）</label>
+                        <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
+                            <input type="number" id="blockSelect" min="2" max="99" value="2"
+                                   style="width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: var(--bg-secondary); color: var(--text);">
+                            <span id="blockTimeCalc" style="color: var(--text-secondary); font-size: 13px;">= 60 分鐘（1 小時）</span>
+                        </div>
                     </div>
                 </div>
 
@@ -2088,6 +2084,16 @@
                     });
                 });
 
+                // Block 數量即時試算
+                const updateBlockCalc = () => {
+                    const n = parseInt(document.getElementById('blockSelect').value) || 2;
+                    const mins = n * 30;
+                    const hrs = mins / 60;
+                    const hrsText = Number.isInteger(hrs) ? `${hrs} 小時` : `${hrs.toFixed(1)} 小時`;
+                    document.getElementById('blockTimeCalc').textContent = `= ${mins} 分鐘（${hrsText}）`;
+                };
+                document.getElementById('blockSelect').addEventListener('input', updateBlockCalc);
+
                 // 遞迴選項
                 document.getElementById('taskRecurring').addEventListener('change', (e) => {
                     document.getElementById('recurringOptions').style.display = e.target.checked ? 'block' : 'none';
@@ -2302,6 +2308,7 @@
                     blockSelectGroup.style.display = 'block';
                     if (task.blocks) {
                         document.getElementById('blockSelect').value = task.blocks;
+                        document.getElementById('blockSelect').dispatchEvent(new Event('input'));
                     }
                 } else {
                     blockSelectGroup.style.display = 'none';
