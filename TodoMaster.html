@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.5 - 任務管理工具</title>
+    <title>TodoMaster v4.6 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -554,6 +554,32 @@
             flex-direction: column;
         }
 
+        .recurring-end-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .recurring-end-col {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .recurring-end-col label {
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+            font-size: 0.9em;
+        }
+
+        .recurring-divider {
+            color: var(--text-secondary);
+            font-size: 1.1em;
+            padding-bottom: 8px;
+            flex-shrink: 0;
+        }
+
         .form-group label {
             font-weight: 500;
             margin-bottom: 6px;
@@ -789,7 +815,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.5';
+        const APP_VERSION = 'v4.6';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1077,8 +1103,17 @@
                     </div>
 
                     <div class="form-group">
-                        <label>迴圈結束日期（可選，留空為永久）</label>
-                        <input type="date" id="recurringUntilDate">
+                        <div class="recurring-end-row">
+                            <div class="recurring-end-col">
+                                <label>結束日期（選填）</label>
+                                <input type="date" id="recurringUntilDate">
+                            </div>
+                            <div class="recurring-divider">↔</div>
+                            <div class="recurring-end-col">
+                                <label>重複次數（選填）</label>
+                                <input type="number" id="recurringCount" min="1" placeholder="例：12">
+                            </div>
+                        </div>
                     </div>
 
                     <div class="form-group">
@@ -1709,7 +1744,7 @@
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 <div class="task-meta-item">${timeEmojis[task.estimatedTime]} ${estimatedDisplay}</div>
                                 ${task.actualTime ? `<div class="task-meta-item">✓ ${task.actualTime}分鐘</div>` : ''}
-                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}</div>` : ''}
+                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}</div>` : ''}
                             </div>
                             ${task.tags && task.tags.length > 0 ? `
                                 <div class="task-tags">
@@ -2099,6 +2134,54 @@
                     document.getElementById('recurringOptions').style.display = e.target.checked ? 'block' : 'none';
                 });
 
+                // 迴圈雙向推算：截止日期 ↔ 重複次數
+                let _recurringCalcLock = false;
+                const getRecurringBase = () => ({
+                    startDate: document.getElementById('taskDate').value,
+                    interval: parseInt(document.getElementById('recurringDays').value) || 1
+                });
+                const addDays = (dateStr, days) => {
+                    if (!dateStr) return '';
+                    const d = new Date(dateStr + 'T00:00:00');
+                    d.setDate(d.getDate() + days);
+                    return d.toISOString().slice(0, 10);
+                };
+                const daysDiff = (a, b) => {
+                    if (!a || !b) return null;
+                    const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
+                    return Math.round((db - da) / 86400000);
+                };
+                const syncUntilDateFromCount = () => {
+                    if (_recurringCalcLock) return;
+                    const { startDate, interval } = getRecurringBase();
+                    const count = parseInt(document.getElementById('recurringCount').value);
+                    if (!startDate || !count || count < 1) return;
+                    _recurringCalcLock = true;
+                    document.getElementById('recurringUntilDate').value = addDays(startDate, interval * (count - 1));
+                    _recurringCalcLock = false;
+                };
+                const syncCountFromUntilDate = () => {
+                    if (_recurringCalcLock) return;
+                    const { startDate, interval } = getRecurringBase();
+                    const untilDate = document.getElementById('recurringUntilDate').value;
+                    if (!startDate || !untilDate) return;
+                    const diff = daysDiff(startDate, untilDate);
+                    if (diff === null || diff < 0) return;
+                    _recurringCalcLock = true;
+                    document.getElementById('recurringCount').value = Math.floor(diff / interval) + 1;
+                    _recurringCalcLock = false;
+                };
+                document.getElementById('recurringCount').addEventListener('input', syncUntilDateFromCount);
+                document.getElementById('recurringUntilDate').addEventListener('change', syncCountFromUntilDate);
+                document.getElementById('recurringDays').addEventListener('input', () => {
+                    if (document.getElementById('recurringCount').value) syncUntilDateFromCount();
+                    else if (document.getElementById('recurringUntilDate').value) syncCountFromUntilDate();
+                });
+                document.getElementById('taskDate').addEventListener('change', () => {
+                    if (document.getElementById('recurringCount').value) syncUntilDateFromCount();
+                    else if (document.getElementById('recurringUntilDate').value) syncCountFromUntilDate();
+                });
+
                 // 任務群組選項
                 document.getElementById('taskGroup').addEventListener('change', (e) => {
                     const groupOptions = document.getElementById('groupOptions');
@@ -2321,6 +2404,7 @@
                 if (task.recurring) {
                     document.getElementById('recurringDays').value = task.recurring.interval || 1;
                     document.getElementById('recurringUntilDate').value = task.recurring.untilDate || '';
+                    document.getElementById('recurringCount').value = task.recurring.repeatCount || '';
                 }
 
                 document.getElementById('taskGroup').checked = !!task.groupId;
@@ -3420,7 +3504,8 @@
                     taskData.recurring = {
                         enabled: true,
                         interval: parseInt(document.getElementById('recurringDays').value),
-                        untilDate: document.getElementById('recurringUntilDate').value || null
+                        untilDate: document.getElementById('recurringUntilDate').value || null,
+                        repeatCount: parseInt(document.getElementById('recurringCount').value) || null
                     };
                 }
 
