@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.6 - 任務管理工具</title>
+    <title>TodoMaster v4.7 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -815,7 +815,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.6';
+        const APP_VERSION = 'v4.7';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1136,6 +1136,19 @@
                         <div class="form-group" id="newGroupNameGroup" style="display: none;">
                             <label>新群組名稱</label>
                             <input type="text" id="newGroupName" placeholder="例：健身計劃">
+                        </div>
+                        <div class="form-group">
+                            <label>週期設定方式</label>
+                            <div class="radio-group">
+                                <label class="radio-item">
+                                    <input type="radio" name="groupCycleMode" value="uniform" checked>
+                                    <span>統一（所有任務間隔相同，改一個自動同步）</span>
+                                </label>
+                                <label class="radio-item">
+                                    <input type="radio" name="groupCycleMode" value="individual">
+                                    <span>個別設定（各任務自訂天數，依序累加排程）</span>
+                                </label>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label>此群組內順序</label>
@@ -2471,6 +2484,11 @@
                     groupSelect.appendChild(option);
                 });
 
+                const setCycleModeRadio = (mode) => {
+                    const radio = document.querySelector(`input[name="groupCycleMode"][value="${mode}"]`);
+                    if (radio) radio.checked = true;
+                };
+
                 // 監聽選擇變化
                 groupSelect.onchange = () => {
                     const isNewGroup = groupSelect.value === '';
@@ -2482,8 +2500,10 @@
                             .sort((a, b) => (a.groupOrder || 1) - (b.groupOrder || 1));
                         const nextOrder = groupTasks.length + 1;
                         groupOrderDisplay.textContent = `此群組已有 ${groupTasks.length} 個任務，新任務順序：${nextOrder}`;
+                        setCycleModeRadio(groupTasks[0]?.groupCycleMode || 'uniform');
                     } else {
                         groupOrderDisplay.textContent = '';
+                        setCycleModeRadio('uniform');
                     }
                 };
 
@@ -2492,9 +2512,11 @@
                     const groupTasks = this.tasks.filter(t => t.groupId === currentGroupId);
                     const currentTaskOrder = groupTasks.find(t => t.id === this.currentEditingTask.id)?.groupOrder || 1;
                     groupOrderDisplay.textContent = `此群組有 ${groupTasks.length} 個任務，當前順序：${currentTaskOrder}`;
+                    setCycleModeRadio(groupTasks[0]?.groupCycleMode || 'uniform');
                 } else {
                     newGroupNameGroup.style.display = 'block';
                     groupOrderDisplay.textContent = '';
+                    setCycleModeRadio('uniform');
                 }
             }
 
@@ -2656,8 +2678,9 @@
                         .sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
 
                     const lastTask = activeTasks[activeTasks.length - 1];
+                    const cascadeInterval = lastTask?.recurring?.interval ?? interval;
                     if (lastTask && lastTask.date && lastTask.date !== '9999-12-31') {
-                        nextDate = addDaysToDate(lastTask.date, interval);
+                        nextDate = addDaysToDate(lastTask.date, cascadeInterval);
                     } else if (completedTask.date && completedTask.date !== '9999-12-31') {
                         nextDate = addDaysToDate(completedTask.date, interval);
                     }
@@ -2699,6 +2722,7 @@
                     recurring: { ...completedTask.recurring },
                     groupId: completedTask.groupId || null,
                     groupName: completedTask.groupName || null,
+                    groupCycleMode: completedTask.groupCycleMode || 'uniform',
                     groupOrder: newGroupOrder,
                     actualTime: null,
                     nextStepNotes: null
@@ -3531,6 +3555,7 @@
 
                     taskData.groupId = groupId;
                     taskData.groupName = groupName;
+                    taskData.groupCycleMode = document.querySelector('input[name="groupCycleMode"]:checked')?.value || 'uniform';
                     // 編輯既有任務且群組未更換時，保留原本的 groupOrder；其餘情況排到最後
                     if (this.currentEditingTask && this.currentEditingTask.groupId === groupId) {
                         taskData.groupOrder = this.currentEditingTask.groupOrder;
@@ -3574,6 +3599,18 @@
                 } else {
                     this.addTask(taskData);
                     this.showNotification('✅ 任務已添加');
+                }
+
+                // 群組週期模式：廣播到同群組所有任務；統一模式下同步間隔天數
+                if (taskData.groupId) {
+                    this.tasks.forEach(t => {
+                        if (t.groupId === taskData.groupId) {
+                            t.groupCycleMode = taskData.groupCycleMode;
+                            if (taskData.groupCycleMode === 'uniform' && t.recurring && taskData.recurring) {
+                                t.recurring.interval = taskData.recurring.interval;
+                            }
+                        }
+                    });
                 }
 
                 // 如果是群組任務，自動計算日期
@@ -3620,14 +3657,25 @@
 
             if (validDates.length === 0) return;
 
-            const interval = activeTasks[0].recurring.interval;
             const baseDate = new Date(validDates[0]);
+            const cycleMode = activeTasks[0].groupCycleMode || 'uniform';
 
-            activeTasks.forEach((task, index) => {
-                const newDate = new Date(baseDate);
-                newDate.setDate(newDate.getDate() + index * interval);
-                task.date = localDateStr(newDate);
-            });
+            if (cycleMode === 'individual') {
+                // 個別設定：每個任務的間隔天數表示到下一個任務的天數，依序累加排程
+                let cursor = new Date(baseDate);
+                activeTasks.forEach(task => {
+                    task.date = localDateStr(cursor);
+                    cursor.setDate(cursor.getDate() + (task.recurring.interval || 1));
+                });
+            } else {
+                // 統一：所有任務共用同一間隔天數
+                const interval = activeTasks[0].recurring.interval;
+                activeTasks.forEach((task, index) => {
+                    const newDate = new Date(baseDate);
+                    newDate.setDate(newDate.getDate() + index * interval);
+                    task.date = localDateStr(newDate);
+                });
+            }
 
             this.saveToStorage();
         }
