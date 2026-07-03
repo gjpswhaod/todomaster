@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.7 - 任務管理工具</title>
+    <title>TodoMaster v4.7.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -815,7 +815,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.7';
+        const APP_VERSION = 'v4.7.1';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -2872,7 +2872,7 @@
                                 daysToAdd += 7; // 下週
                             }
                             targetDate.setDate(targetDate.getDate() + daysToAdd);
-                            document.getElementById('taskDate').value = getDateString(targetDate);
+                            document.getElementById('taskDate').value = localDateStr(targetDate);
                         };
                     }
                 });
