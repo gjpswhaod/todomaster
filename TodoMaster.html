@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.8.1 - 任務管理工具</title>
+    <title>TodoMaster v4.9 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -92,6 +92,7 @@
             color: var(--accent-primary);
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 8px;
         }
 
@@ -484,6 +485,11 @@
             color: var(--text-secondary);
             font-size: 0.9rem;
             margin-top: 4px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            padding: 8px 10px;
+            background-color: var(--bg-tertiary);
+            border-radius: 6px;
         }
 
         .task-tags {
@@ -815,7 +821,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.8.1';
+        const APP_VERSION = 'v4.9';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -842,21 +848,16 @@
     <div class="app-container">
         <!-- 側邊欄 -->
         <aside class="sidebar">
-            <div class="sidebar-header">📋 TodoMaster</div>
+            <div class="sidebar-header">
+                📋 TodoMaster
+                <button class="btn btn-secondary btn-small" id="sidebarCloseBtn" title="收合側欄">✕</button>
+            </div>
 
             <div class="sidebar-section">
                 <div class="sidebar-section-title">視圖</div>
                 <button class="filter-item active" data-filter="all">
                     <span class="filter-icon">📊</span>
                     所有任務
-                </button>
-                <button class="filter-item" data-filter="today">
-                    <span class="filter-icon">📅</span>
-                    今天
-                </button>
-                <button class="filter-item" data-filter="upcoming">
-                    <span class="filter-icon">📌</span>
-                    最近到期
                 </button>
                 <button class="filter-item" data-filter="completed">
                     <span class="filter-icon">✅</span>
@@ -930,15 +931,8 @@
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="exportSyncBtn">
                     ⬆️ 匯出同步
                 </button>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 14px;" id="importSyncBtn">
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center;" id="importSyncBtn">
                     ⬇️ 匯入同步
-                </button>
-                <div style="font-size: 0.72rem; color: var(--text-secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">手動備份</div>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="downloadBackupBtn">
-                    ⬇️ 下載備份
-                </button>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center;" id="uploadBackupBtn">
-                    ⬆️ 導入備份
                 </button>
             </div>
         </aside>
@@ -1490,26 +1484,6 @@
                 today.setHours(0, 0, 0, 0);
 
                 switch (this.currentFilter) {
-                    case 'today':
-                        filtered = filtered.filter(t => {
-                            if (!t.date || t.date === '9999-12-31') return false;
-                            const taskDate = new Date(t.date);
-                            taskDate.setHours(0, 0, 0, 0);
-                            return taskDate.getTime() === today.getTime();
-                        });
-                        break;
-                    case 'upcoming':
-                        filtered = filtered.filter(t => {
-                            if (!t.date || t.date === '9999-12-31' || t.completed) return false;
-                            const taskDate = new Date(t.date);
-                            taskDate.setHours(0, 0, 0, 0);
-                            const tomorrow = new Date(today);
-                            tomorrow.setDate(today.getDate() + 1);
-                            const dayAfterTomorrow = new Date(today);
-                            dayAfterTomorrow.setDate(today.getDate() + 2);
-                            return taskDate.getTime() >= tomorrow.getTime() && taskDate.getTime() <= dayAfterTomorrow.getTime();
-                        });
-                        break;
                     case 'completed':
                         filtered = filtered.filter(t => t.completed);
                         break;
@@ -2288,6 +2262,11 @@
                         btn.classList.add('active');
                         this.currentFilter = filter;
                         this.renderTasks();
+
+                        // 手機版：選擇視圖/分類後自動收合側欄，避免遮住任務列表
+                        if (window.innerWidth <= 768) {
+                            this.closeSidebarOverlay();
+                        }
                     });
                 });
 
@@ -2353,6 +2332,7 @@
 
                 // 菜單 / 側欄收合切換
                 const menuToggleBtn = document.getElementById('menuToggleBtn');
+                const sidebarCloseBtn = document.getElementById('sidebarCloseBtn');
                 const sidebar = document.querySelector('.sidebar');
 
                 if (window.innerWidth <= 768) {
@@ -2374,6 +2354,26 @@
                         localStorage.setItem('todoSidebarCollapsed', isCollapsed ? '1' : '0');
                         menuToggleBtn.textContent = isCollapsed ? '☰ 展開' : '☰ 收合';
                     });
+                }
+
+                if (sidebarCloseBtn) {
+                    sidebarCloseBtn.addEventListener('click', () => this.closeSidebarOverlay());
+                }
+            }
+
+            // 收合側欄（手機：關閉 overlay；桌面：收合並記住狀態），供側欄內按鈕與選擇視圖/分類後共用
+            closeSidebarOverlay() {
+                const sidebar = document.querySelector('.sidebar');
+                const menuToggleBtn = document.getElementById('menuToggleBtn');
+                if (!sidebar) return;
+
+                if (window.innerWidth <= 768) {
+                    sidebar.classList.remove('active');
+                    if (menuToggleBtn) menuToggleBtn.textContent = '☰ 菜單';
+                } else {
+                    sidebar.classList.add('collapsed');
+                    localStorage.setItem('todoSidebarCollapsed', '1');
+                    if (menuToggleBtn) menuToggleBtn.textContent = '☰ 展開';
                 }
             }
 
@@ -2920,56 +2920,6 @@
                 };
             }
 
-            downloadBackup() {
-                const data = this._buildBackupData();
-
-                const dataStr = JSON.stringify(data, null, 2);
-                const dataBlob = new Blob([dataStr], { type: 'application/json' });
-                const url = URL.createObjectURL(dataBlob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `todolist-backup-${localDateStr()}.json`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
-
-                this.showNotification('✅ 備份已下載');
-            }
-
-            uploadBackup() {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-
-                input.addEventListener('change', (e) => {
-                    const file = e.target.files[0];
-                    if (!file) return;
-
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        try {
-                            const data = JSON.parse(event.target.result);
-
-                            if (data.tasks && Array.isArray(data.tasks)) {
-                                this.tasks = data.tasks;
-                                this.tags = data.tags || [];
-                                this.saveToStorage();
-                                this.updateUI();
-                                this.showNotification('✅ 備份已成功導入');
-                            } else {
-                                this.showNotification('❌ 檔案格式無效');
-                            }
-                        } catch (err) {
-                            this.showNotification('❌ 無法讀取檔案：' + err.message);
-                        }
-                    };
-                    reader.readAsText(file);
-                });
-
-                input.click();
-            }
-
             // ===== 同步資料夾功能 =====
 
             async setSyncFolder() {
@@ -3216,17 +3166,9 @@
             }
 
             setupBackupListeners() {
-                const downloadBtn = document.getElementById('downloadBackupBtn');
-                const uploadBtn = document.getElementById('uploadBackupBtn');
                 const setSyncBtn = document.getElementById('setSyncFolderBtn');
                 const exportSyncBtn = document.getElementById('exportSyncBtn');
 
-                if (downloadBtn) {
-                    downloadBtn.addEventListener('click', () => this.downloadBackup());
-                }
-                if (uploadBtn) {
-                    uploadBtn.addEventListener('click', () => this.uploadBackup());
-                }
                 if (setSyncBtn) {
                     setSyncBtn.addEventListener('click', () => this.setSyncFolder());
                 }
