@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.7.1 - 任務管理工具</title>
+    <title>TodoMaster v4.8.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -815,7 +815,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.7.1';
+        const APP_VERSION = 'v4.8.1';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -828,6 +828,11 @@
             const dt = new Date(y, m - 1, d);
             dt.setDate(dt.getDate() + n);
             return localDateStr(dt);
+        }
+        function getTodayMidnight() {
+            const d = new Date();
+            d.setHours(0, 0, 0, 0);
+            return d;
         }
 
 </script>
@@ -1151,6 +1156,19 @@
                             </div>
                         </div>
                         <div class="form-group">
+                            <label>延後設定方式</label>
+                            <div class="radio-group">
+                                <label class="radio-item">
+                                    <input type="radio" name="groupDelayMode" value="fixed" checked>
+                                    <span>固定日期（逾期重新安排到今天不影響後續任務，僅拖曳排序時重算）</span>
+                                </label>
+                                <label class="radio-item">
+                                    <input type="radio" name="groupDelayMode" value="auto">
+                                    <span>自動延後（逾期重新安排到今天後，後續任務日期一併重新計算）</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
                             <label>此群組內順序</label>
                             <div id="groupOrderDisplay" style="padding: 10px; background-color: var(--bg-tertiary); border-radius: 6px; color: var(--text-secondary);"></div>
                         </div>
@@ -1464,16 +1482,6 @@
                 }
             }
 
-            deleteTag(name) {
-                this.tags = this.tags.filter(t => t !== name);
-                this.tasks.forEach(task => {
-                    if (task.tags) {
-                        task.tags = task.tags.filter(tag => tag !== name);
-                    }
-                });
-                this.saveToStorage();
-            }
-
             // ===== 過濾和排序 =====
             getFilteredTasks() {
                 let filtered = [...this.tasks];
@@ -1626,11 +1634,11 @@
                 // 三區塊視圖：僅 'all' filter
                 const isSectionView = this.currentFilter === 'all';
                 let sectionOverdueList = null, sectionTodayList = null, sectionTomorrowList = null, sectionLaterList = null;
+                const todayStr = localDateStr();
+                const todayMidnight = getTodayMidnight();
+                const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+                const tomorrowStr = localDateStr(tomorrowDate);
                 if (isSectionView) {
-                    const todayStr = localDateStr();
-                    const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-                    const tomorrowStr = localDateStr(tomorrowDate);
-
                     taskList.innerHTML = `
                         <div class="time-section" id="section-overdue" data-section="overdue">
                             <div class="time-section-header">⚠️ 逾期
@@ -1677,13 +1685,20 @@
                     if (rescheduleAllBtn) {
                         rescheduleAllBtn.addEventListener('click', () => {
                             const todayStr = localDateStr();
-                            const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+                            const todayMidnight = getTodayMidnight();
                             const overdueTasks = this.tasks.filter(t => {
                                 if (!t.date || t.date === '9999-12-31' || t.completed) return false;
                                 const d = new Date(t.date); d.setHours(0,0,0,0);
                                 return d < todayMidnight;
                             });
-                            overdueTasks.forEach(t => this.updateTask(t.id, { date: todayStr }));
+                            const affectedGroupIds = new Set();
+                            overdueTasks.forEach(t => {
+                                this.updateTask(t.id, { date: todayStr });
+                                if (t.groupId && t.groupDelayMode === 'auto') {
+                                    affectedGroupIds.add(t.groupId);
+                                }
+                            });
+                            affectedGroupIds.forEach(groupId => this.updateGroupTaskDates(groupId));
                             if (overdueTasks.length > 0) {
                                 this.showNotification(`📅 已將 ${overdueTasks.length} 個逾期任務重新安排到今天`);
                                 this.updateUI();
@@ -1890,6 +1905,9 @@
                             e.stopPropagation();
                             const todayStr = localDateStr();
                             this.updateTask(task.id, { date: todayStr });
+                            if (task.groupId && task.groupDelayMode === 'auto') {
+                                this.updateGroupTaskDates(task.groupId);
+                            }
                             this.showNotification('📅 已重新安排到今天');
                             this.updateUI();
                         });
@@ -1904,10 +1922,6 @@
 
                     // 三區塊模式：依日期分配至對應 section list
                     if (isSectionView) {
-                        const todayStr = localDateStr();
-                        const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-                        const tomorrowStr = localDateStr(tomorrowDate);
-                        const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
                         const taskDateObj = (task.date && task.date !== '9999-12-31') ? (() => { const d = new Date(task.date); d.setHours(0,0,0,0); return d; })() : null;
                         const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
                         if (isOverdue) sectionOverdueList.appendChild(li);
@@ -1940,8 +1954,7 @@
                 }
 
                 const taskDate = new Date(task.date);
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                const today = getTodayMidnight();
                 taskDate.setHours(0, 0, 0, 0);
 
                 const diff = taskDate.getTime() - today.getTime();
@@ -2489,6 +2502,11 @@
                     if (radio) radio.checked = true;
                 };
 
+                const setDelayModeRadio = (mode) => {
+                    const radio = document.querySelector(`input[name="groupDelayMode"][value="${mode}"]`);
+                    if (radio) radio.checked = true;
+                };
+
                 // 監聽選擇變化
                 groupSelect.onchange = () => {
                     const isNewGroup = groupSelect.value === '';
@@ -2501,9 +2519,11 @@
                         const nextOrder = groupTasks.length + 1;
                         groupOrderDisplay.textContent = `此群組已有 ${groupTasks.length} 個任務，新任務順序：${nextOrder}`;
                         setCycleModeRadio(groupTasks[0]?.groupCycleMode || 'uniform');
+                        setDelayModeRadio(groupTasks[0]?.groupDelayMode || 'fixed');
                     } else {
                         groupOrderDisplay.textContent = '';
                         setCycleModeRadio('uniform');
+                        setDelayModeRadio('fixed');
                     }
                 };
 
@@ -2513,10 +2533,12 @@
                     const currentTaskOrder = groupTasks.find(t => t.id === this.currentEditingTask.id)?.groupOrder || 1;
                     groupOrderDisplay.textContent = `此群組有 ${groupTasks.length} 個任務，當前順序：${currentTaskOrder}`;
                     setCycleModeRadio(groupTasks[0]?.groupCycleMode || 'uniform');
+                    setDelayModeRadio(groupTasks[0]?.groupDelayMode || 'fixed');
                 } else {
                     newGroupNameGroup.style.display = 'block';
                     groupOrderDisplay.textContent = '';
                     setCycleModeRadio('uniform');
+                    setDelayModeRadio('fixed');
                 }
             }
 
@@ -2723,6 +2745,7 @@
                     groupId: completedTask.groupId || null,
                     groupName: completedTask.groupName || null,
                     groupCycleMode: completedTask.groupCycleMode || 'uniform',
+                    groupDelayMode: completedTask.groupDelayMode || 'fixed',
                     groupOrder: newGroupOrder,
                     actualTime: null,
                     nextStepNotes: null
@@ -3556,6 +3579,7 @@
                     taskData.groupId = groupId;
                     taskData.groupName = groupName;
                     taskData.groupCycleMode = document.querySelector('input[name="groupCycleMode"]:checked')?.value || 'uniform';
+                    taskData.groupDelayMode = document.querySelector('input[name="groupDelayMode"]:checked')?.value || 'fixed';
                     // 編輯既有任務且群組未更換時，保留原本的 groupOrder；其餘情況排到最後
                     if (this.currentEditingTask && this.currentEditingTask.groupId === groupId) {
                         taskData.groupOrder = this.currentEditingTask.groupOrder;
@@ -3606,6 +3630,7 @@
                     this.tasks.forEach(t => {
                         if (t.groupId === taskData.groupId) {
                             t.groupCycleMode = taskData.groupCycleMode;
+                            t.groupDelayMode = taskData.groupDelayMode;
                             if (taskData.groupCycleMode === 'uniform' && t.recurring && taskData.recurring) {
                                 t.recurring.interval = taskData.recurring.interval;
                             }
@@ -3640,79 +3665,79 @@
                 return Object.values(groups);
             }
 
-        updateGroupTaskDates(groupId) {
-            // 只重算未完成的任務，已完成任務保留原日期作為歷史記錄
-            const activeTasks = this.tasks
-                .filter(t => t.groupId === groupId && !t.completed && t.recurring && t.recurring.enabled)
-                .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0));
+            updateGroupTaskDates(groupId) {
+                // 只重算未完成的任務，已完成任務保留原日期作為歷史記錄
+                const activeTasks = this.tasks
+                    .filter(t => t.groupId === groupId && !t.completed && t.recurring && t.recurring.enabled)
+                    .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0));
 
-            if (activeTasks.length === 0) return;
+                if (activeTasks.length === 0) return;
 
-            // 基準日期取所有活躍任務中最早的有效日期（不受當前排列順序影響）
-            // 這確保每次拖曳重排只是重新分配固定時間槽，不會讓日期不斷往後推移
-            const validDates = activeTasks
-                .map(t => t.date)
-                .filter(d => d && d !== '9999-12-31')
-                .sort();
+                // 基準日期取所有活躍任務中最早的有效日期（不受當前排列順序影響）
+                // 這確保每次拖曳重排只是重新分配固定時間槽，不會讓日期不斷往後推移
+                const validDates = activeTasks
+                    .map(t => t.date)
+                    .filter(d => d && d !== '9999-12-31')
+                    .sort();
 
-            if (validDates.length === 0) return;
+                if (validDates.length === 0) return;
 
-            const baseDate = new Date(validDates[0]);
-            const cycleMode = activeTasks[0].groupCycleMode || 'uniform';
+                const baseDate = new Date(validDates[0]);
+                const cycleMode = activeTasks[0].groupCycleMode || 'uniform';
 
-            if (cycleMode === 'individual') {
-                // 個別設定：每個任務的間隔天數表示到下一個任務的天數，依序累加排程
-                let cursor = new Date(baseDate);
-                activeTasks.forEach(task => {
-                    task.date = localDateStr(cursor);
-                    cursor.setDate(cursor.getDate() + (task.recurring.interval || 1));
-                });
-            } else {
-                // 統一：所有任務共用同一間隔天數
-                const interval = activeTasks[0].recurring.interval;
-                activeTasks.forEach((task, index) => {
-                    const newDate = new Date(baseDate);
-                    newDate.setDate(newDate.getDate() + index * interval);
-                    task.date = localDateStr(newDate);
-                });
-            }
-
-            this.saveToStorage();
-        }
-
-        renderGroups() {
-            const container = document.getElementById('groupContainer');
-            if (!container) return;
-
-            const filterList = container.querySelector('.filter-list');
-            filterList.innerHTML = '';
-
-            const groups = this.getGroupsList();
-            if (groups.length === 0) {
-                container.style.display = 'none';
-                return;
-            }
-            container.style.display = '';
-
-            groups.forEach(group => {
-                const btn = document.createElement('button');
-                btn.className = 'filter-item';
-                if (this.currentFilter === `group:${group.groupId}`) {
-                    btn.classList.add('active');
+                if (cycleMode === 'individual') {
+                    // 個別設定：每個任務的間隔天數表示到下一個任務的天數，依序累加排程
+                    let cursor = new Date(baseDate);
+                    activeTasks.forEach(task => {
+                        task.date = localDateStr(cursor);
+                        cursor.setDate(cursor.getDate() + (task.recurring.interval || 1));
+                    });
+                } else {
+                    // 統一：所有任務共用同一間隔天數
+                    const interval = activeTasks[0].recurring.interval;
+                    activeTasks.forEach((task, index) => {
+                        const newDate = new Date(baseDate);
+                        newDate.setDate(newDate.getDate() + index * interval);
+                        task.date = localDateStr(newDate);
+                    });
                 }
-                btn.innerHTML = `<span class="filter-icon">🔁</span>${this.escapeHtml(group.name)}`;
-                btn.dataset.filter = `group:${group.groupId}`;
-                btn.onclick = () => {
-                    document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    this.currentFilter = `group:${group.groupId}`;
-                    this.renderTasks();
-                };
-                filterList.appendChild(btn);
-            });
-        }
 
-    }  // ✅ 關閉 TodoApp 類
+                this.saveToStorage();
+            }
+
+            renderGroups() {
+                const container = document.getElementById('groupContainer');
+                if (!container) return;
+
+                const filterList = container.querySelector('.filter-list');
+                filterList.innerHTML = '';
+
+                const groups = this.getGroupsList();
+                if (groups.length === 0) {
+                    container.style.display = 'none';
+                    return;
+                }
+                container.style.display = '';
+
+                groups.forEach(group => {
+                    const btn = document.createElement('button');
+                    btn.className = 'filter-item';
+                    if (this.currentFilter === `group:${group.groupId}`) {
+                        btn.classList.add('active');
+                    }
+                    btn.innerHTML = `<span class="filter-icon">🔁</span>${this.escapeHtml(group.name)}`;
+                    btn.dataset.filter = `group:${group.groupId}`;
+                    btn.onclick = () => {
+                        document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        this.currentFilter = `group:${group.groupId}`;
+                        this.renderTasks();
+                    };
+                    filterList.appendChild(btn);
+                });
+            }
+
+        }  // ✅ 關閉 TodoApp 類
 
         // ===== 全局函數 =====
         let app;
