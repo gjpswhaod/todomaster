@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v4.9 - 任務管理工具</title>
+    <title>TodoMaster v5.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -382,6 +382,14 @@
             user-select: none;
         }
         .time-section.drag-over { background: rgba(99,179,237,0.07); border-radius: 8px; }
+        .section-time-total {
+            font-size: 0.72rem;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: normal;
+            color: var(--text-secondary);
+            opacity: 0.75;
+        }
         .section-task-list { list-style: none; padding: 0; margin: 0; min-height: 36px; }
         .reschedule-all-btn {
             font-size: 0.7rem;
@@ -821,7 +829,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v4.9';
+        const APP_VERSION = 'v5.0';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -839,6 +847,17 @@
             const d = new Date();
             d.setHours(0, 0, 0, 0);
             return d;
+        }
+        function getTaskPlannedMinutes(task) {
+            if (task.estimatedTime === 'non-continuous') return 0;
+            if (task.estimatedTime === '30plus' && task.blocks) return task.blocks * 30;
+            const estimatedMap = { '10min': 10, '30min': 30 };
+            return estimatedMap[task.estimatedTime] ?? 0;
+        }
+        function formatDuration(minutes) {
+            const hrs = minutes / 60;
+            const hrsText = Number.isInteger(hrs) ? `${hrs}` : hrs.toFixed(1);
+            return `${hrsText} 小時`;
         }
 
 </script>
@@ -859,13 +878,13 @@
                     <span class="filter-icon">📊</span>
                     所有任務
                 </button>
-                <button class="filter-item" data-filter="completed">
-                    <span class="filter-icon">✅</span>
-                    已完成
+                <button class="filter-item" id="toggleSortBtn">
+                    <span class="filter-icon">🔄</span>
+                    <span id="sortModeText">拖曳排序</span>
                 </button>
-                <button class="filter-item" data-filter="overdue">
-                    <span class="filter-icon">⚠️</span>
-                    逾期
+                <button class="filter-item" id="toggleCompletedBtn">
+                    <span class="filter-icon">✅</span>
+                    <span id="completedVisibilityText">顯示已完成</span>
                 </button>
             </div>
 
@@ -902,14 +921,6 @@
 
             <div class="sidebar-section">
                 <div class="sidebar-section-title">選項</div>
-                <button class="filter-item" id="toggleSortBtn">
-                    <span class="filter-icon">🔄</span>
-                    <span id="sortModeText">拖曳排序</span>
-                </button>
-                <button class="filter-item" id="toggleCompletedBtn">
-                    <span class="filter-icon">✅</span>
-                    <span id="completedVisibilityText">顯示已完成</span>
-                </button>
                 <button class="filter-item" id="statsBtn">
                     <span class="filter-icon">📊</span>
                     時間統計
@@ -1480,32 +1491,15 @@
             getFilteredTasks() {
                 let filtered = [...this.tasks];
 
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-
-                switch (this.currentFilter) {
-                    case 'completed':
-                        filtered = filtered.filter(t => t.completed);
-                        break;
-                    case 'overdue':
-                        filtered = filtered.filter(t => {
-                            if (!t.date || t.date === '9999-12-31' || t.completed) return false;
-                            const taskDate = new Date(t.date);
-                            taskDate.setHours(0, 0, 0, 0);
-                            return taskDate.getTime() < today.getTime();
-                        });
-                        break;
-                    default:
-                        if (this.currentFilter.startsWith('category:')) {
-                            const category = this.currentFilter.split(':')[1];
-                            filtered = filtered.filter(t => t.category === category);
-                        } else if (this.currentFilter.startsWith('tag:')) {
-                            const tag = this.currentFilter.split(':')[1];
-                            filtered = filtered.filter(t => t.tags && t.tags.includes(tag));
-                        } else if (this.currentFilter.startsWith('group:')) {
-                            const groupId = this.currentFilter.split(':')[1];
-                            filtered = filtered.filter(t => t.groupId === groupId);
-                        }
+                if (this.currentFilter.startsWith('category:')) {
+                    const category = this.currentFilter.split(':')[1];
+                    filtered = filtered.filter(t => t.category === category);
+                } else if (this.currentFilter.startsWith('tag:')) {
+                    const tag = this.currentFilter.split(':')[1];
+                    filtered = filtered.filter(t => t.tags && t.tags.includes(tag));
+                } else if (this.currentFilter.startsWith('group:')) {
+                    const groupId = this.currentFilter.split(':')[1];
+                    filtered = filtered.filter(t => t.groupId === groupId);
                 }
 
                 if (!this.showCompleted) {
@@ -1607,11 +1601,13 @@
 
                 // 三區塊視圖：僅 'all' filter
                 const isSectionView = this.currentFilter === 'all';
-                let sectionOverdueList = null, sectionTodayList = null, sectionTomorrowList = null, sectionLaterList = null;
+                let sectionOverdueList = null, sectionTodayList = null, sectionTomorrowList = null, sectionDayAfterList = null, sectionLaterList = null;
                 const todayStr = localDateStr();
                 const todayMidnight = getTodayMidnight();
                 const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
                 const tomorrowStr = localDateStr(tomorrowDate);
+                const dayAfterDate = new Date(); dayAfterDate.setDate(dayAfterDate.getDate() + 2);
+                const dayAfterStr = localDateStr(dayAfterDate);
                 if (isSectionView) {
                     taskList.innerHTML = `
                         <div class="time-section" id="section-overdue" data-section="overdue">
@@ -1621,12 +1617,16 @@
                             <ol class="task-list section-task-list" id="taskList-overdue"></ol>
                         </div>
                         <div class="time-section" id="section-today" data-section="today">
-                            <div class="time-section-header">📅 今天</div>
+                            <div class="time-section-header">📅 今天<span class="section-time-total" id="section-today-total"></span></div>
                             <ol class="task-list section-task-list" id="taskList-today"></ol>
                         </div>
                         <div class="time-section" id="section-tomorrow" data-section="tomorrow">
-                            <div class="time-section-header">🌅 明天</div>
+                            <div class="time-section-header">🌅 明天<span class="section-time-total" id="section-tomorrow-total"></span></div>
                             <ol class="task-list section-task-list" id="taskList-tomorrow"></ol>
+                        </div>
+                        <div class="time-section" id="section-dayafter" data-section="dayafter">
+                            <div class="time-section-header">🌤️ 後天<span class="section-time-total" id="section-dayafter-total"></span></div>
+                            <ol class="task-list section-task-list" id="taskList-dayafter"></ol>
                         </div>
                         <div class="time-section" id="section-later" data-section="later">
                             <div class="time-section-header">🗓️ 更久以後</div>
@@ -1636,6 +1636,7 @@
                     sectionOverdueList = document.getElementById('taskList-overdue');
                     sectionTodayList = document.getElementById('taskList-today');
                     sectionTomorrowList = document.getElementById('taskList-tomorrow');
+                    sectionDayAfterList = document.getElementById('taskList-dayafter');
                     sectionLaterList = document.getElementById('taskList-later');
 
                     // dragover on section containers for cross-section dragging
@@ -1643,6 +1644,7 @@
                         { el: sectionOverdueList, sec: 'overdue' },
                         { el: sectionTodayList, sec: 'today' },
                         { el: sectionTomorrowList, sec: 'tomorrow' },
+                        { el: sectionDayAfterList, sec: 'dayafter' },
                         { el: sectionLaterList, sec: 'later' }
                     ].forEach(({ el }) => {
                         el.addEventListener('dragover', (e) => {
@@ -1680,6 +1682,8 @@
                         });
                     }
                 }
+
+                let todayMinutes = 0, tomorrowMinutes = 0, dayAfterMinutes = 0;
 
                 filtered.forEach(task => {
                     // 壓縮任務：不顯示卡片，只在時間統計呈現
@@ -1898,18 +1902,39 @@
                     if (isSectionView) {
                         const taskDateObj = (task.date && task.date !== '9999-12-31') ? (() => { const d = new Date(task.date); d.setHours(0,0,0,0); return d; })() : null;
                         const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
-                        if (isOverdue) sectionOverdueList.appendChild(li);
-                        else if (task.date === todayStr) sectionTodayList.appendChild(li);
-                        else if (task.date === tomorrowStr) sectionTomorrowList.appendChild(li);
-                        else sectionLaterList.appendChild(li);
+                        if (isOverdue) {
+                            sectionOverdueList.appendChild(li);
+                        } else if (task.date === todayStr) {
+                            sectionTodayList.appendChild(li);
+                            if (!task.completed) todayMinutes += getTaskPlannedMinutes(task);
+                        } else if (task.date === tomorrowStr) {
+                            sectionTomorrowList.appendChild(li);
+                            if (!task.completed) tomorrowMinutes += getTaskPlannedMinutes(task);
+                        } else if (task.date === dayAfterStr) {
+                            sectionDayAfterList.appendChild(li);
+                            if (!task.completed) dayAfterMinutes += getTaskPlannedMinutes(task);
+                        } else {
+                            sectionLaterList.appendChild(li);
+                        }
                     } else {
                         taskList.appendChild(li);
                     }
                 });
 
+                if (isSectionView) {
+                    [
+                        { id: 'section-today-total', minutes: todayMinutes },
+                        { id: 'section-tomorrow-total', minutes: tomorrowMinutes },
+                        { id: 'section-dayafter-total', minutes: dayAfterMinutes }
+                    ].forEach(({ id, minutes }) => {
+                        const el = document.getElementById(id);
+                        if (el) el.textContent = minutes > 0 ? `（已預定${formatDuration(minutes)}）` : '';
+                    });
+                }
+
                 // 區塊無任務時隱藏
                 if (isSectionView) {
-                    ['overdue', 'today', 'tomorrow', 'later'].forEach(sec => {
+                    ['overdue', 'today', 'tomorrow', 'dayafter', 'later'].forEach(sec => {
                         const section = document.getElementById(`section-${sec}`);
                         const list = document.getElementById(`taskList-${sec}`);
                         if (section && list) section.style.display = list.children.length === 0 ? 'none' : '';
