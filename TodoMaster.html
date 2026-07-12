@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.1.3 - 任務管理工具</title>
+    <title>TodoMaster v5.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -816,7 +816,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.1.3';
+        const APP_VERSION = 'v5.2';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1298,6 +1298,9 @@
                 <button class="btn btn-secondary" id="weekStatsBtn" style="flex: 1;">
                     本週
                 </button>
+                <button class="btn btn-secondary" id="monthStatsBtn" style="flex: 1;">
+                    本月
+                </button>
             </div>
 
             <div id="statsContent" style="overflow-y: auto; max-height: 500px;">
@@ -1305,11 +1308,10 @@
                 <div id="nonContinuousCount" style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);"></div>
                 <div id="categoryBreakdown" style="margin-top: 16px;"></div>
                 <div id="dailyTrendChart" style="margin-top: 16px;"></div>
-                <div id="calendarView" style="margin-top: 16px;"></div>
             </div>
 
             <div style="margin-top: 20px; padding: 12px; background-color: var(--bg-tertiary); border-radius: 6px;">
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; text-align: center;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; text-align: center;">
                     <div>
                         <div class="stat-value" id="totalPlanned">0</div>
                         <div class="stat-label">預計時間</div>
@@ -1321,10 +1323,6 @@
                     <div>
                         <div class="stat-value" id="totalDiff">0</div>
                         <div class="stat-label">時間收支</div>
-                    </div>
-                    <div>
-                        <div class="stat-value" id="accuracyRate">—</div>
-                        <div class="stat-label">時間準確率</div>
                     </div>
                 </div>
             </div>
@@ -1685,17 +1683,18 @@
                 // 已預定/完成時數統計一律以 this.tasks 計算，不受「顯示/隱藏已完成」篩選影響
                 if (isSectionView) {
                     this.tasks.forEach(task => {
-                        if (task.compressed) return;
+                        // 已壓縮任務一律視為已完成，且無逾期疑慮；缺少 date 的舊壓縮資料以 completedDate 近似定位
+                        const bucketDate = task.date || (task.compressed ? task.completedDate : null);
                         const taskDateObj = dateAtMidnight(task.date);
                         const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
                         if (isOverdue) return;
-                        if (task.date === todayStr) {
+                        if (bucketDate === todayStr) {
                             todayMinutes += getTaskPlannedMinutes(task);
                             if (task.completed) todayCompletedMinutes += getTaskPlannedMinutes(task);
-                        } else if (task.date === tomorrowStr) {
+                        } else if (bucketDate === tomorrowStr) {
                             tomorrowMinutes += getTaskPlannedMinutes(task);
                             if (task.completed) tomorrowCompletedMinutes += getTaskPlannedMinutes(task);
-                        } else if (task.date === dayAfterStr) {
+                        } else if (bucketDate === dayAfterStr) {
                             dayAfterMinutes += getTaskPlannedMinutes(task);
                             if (task.completed) dayAfterCompletedMinutes += getTaskPlannedMinutes(task);
                         }
@@ -2817,6 +2816,7 @@
                         category:      task.category,
                         taskType:      task.taskType      || null,
                         estimatedTime: task.estimatedTime || null,
+                        date:          task.date          || null,
                         plannedTime,
                         actualTime:    task.actualTime    || null,
                         completed:     true,
@@ -2825,9 +2825,22 @@
                         timeBalance,
                     };
                 });
+
+                // 清除預定日期/完成日期超過30天前的舊壓縮資料，避免資料無限累積
+                const cutoff = new Date();
+                cutoff.setDate(cutoff.getDate() - 30);
+                const cutoffStr = localDateStr(cutoff);
+                const beforeLen = this.tasks.length;
+                this.tasks = this.tasks.filter(t => {
+                    if (!t.compressed) return true;
+                    const ref = t.completedDate || t.date;
+                    return !ref || ref >= cutoffStr;
+                });
+                const removed = beforeLen - this.tasks.length;
+
                 this.saveToStorage();
                 this.updateUI();
-                this.showNotification(`📦 已壓縮 ${count} 個已完成任務`);
+                this.showNotification(`📦 已壓縮 ${count} 個已完成任務${removed > 0 ? `，並清除 ${removed} 筆逾30天舊資料` : ''}`);
             }
 
             openStatsModal() {
@@ -2836,20 +2849,31 @@
                 // 默認顯示今天的統計
                 document.getElementById('todayStatsBtn').classList.add('active');
                 document.getElementById('weekStatsBtn').classList.remove('active');
+                document.getElementById('monthStatsBtn').classList.remove('active');
 
                 const todayBtn = document.getElementById('todayStatsBtn');
                 const weekBtn = document.getElementById('weekStatsBtn');
+                const monthBtn = document.getElementById('monthStatsBtn');
 
                 todayBtn.onclick = () => {
                     todayBtn.classList.add('active');
                     weekBtn.classList.remove('active');
+                    monthBtn.classList.remove('active');
                     this.renderStats('today');
                 };
 
                 weekBtn.onclick = () => {
                     weekBtn.classList.add('active');
                     todayBtn.classList.remove('active');
+                    monthBtn.classList.remove('active');
                     this.renderStats('week');
+                };
+
+                monthBtn.onclick = () => {
+                    monthBtn.classList.add('active');
+                    todayBtn.classList.remove('active');
+                    weekBtn.classList.remove('active');
+                    this.renderStats('month');
                 };
 
                 this.renderStats('today');
@@ -3190,6 +3214,10 @@
                     const diff = now.getDate() - day + (day === 0 ? -6 : 1);
                     startDate.setDate(diff);
                     startDate.setHours(0, 0, 0, 0);
+                } else if (period === 'month') {
+                    startDate = new Date(now);
+                    startDate.setDate(startDate.getDate() - 29);
+                    startDate.setHours(0, 0, 0, 0);
                 }
 
                 const startDateStr = localDateStr(startDate);
@@ -3223,18 +3251,10 @@
                     if (tb !== null) totalTimeBalance += tb;
                 });
 
-                // 準確率（對稱分數，越高越準）
-                let accuracy = '—';
-                if (stats.plannedTime > 0 && stats.actualTime > 0) {
-                    const ratio = stats.actualTime / stats.plannedTime;
-                    accuracy = Math.round(Math.min(ratio, 1 / ratio) * 100) + '%';
-                }
-
                 // 更新摘要
                 document.getElementById('totalPlanned').textContent = stats.plannedTime + '分';
                 document.getElementById('totalActual').textContent = stats.actualTime + '分';
                 document.getElementById('totalDiff').textContent = `${totalTimeBalance > 0 ? '+' : ''}${totalTimeBalance}分`;
-                document.getElementById('accuracyRate').textContent = accuracy;
 
                 // 渲染表格
                 const statsTable = document.getElementById('statsTable');
@@ -3255,7 +3275,6 @@
                                 <th style="text-align: right; padding: 8px;">預計</th>
                                 <th style="text-align: right; padding: 8px;">實際</th>
                                 <th style="text-align: right; padding: 8px;">時間收支</th>
-                                <th style="text-align: right; padding: 8px;">準確率</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -3264,9 +3283,6 @@
                 stats.tasks.forEach(task => {
                     const tb = task.timeBalance ?? null;
                     const diffStyle = (tb !== null && tb < 0) ? 'color: #ff6b6b;' : 'color: #51cf66;';
-                    const taskRatio = (task.plannedTime > 0 && task.actualTime > 0)
-                        ? Math.round(Math.min(task.actualTime / task.plannedTime, task.plannedTime / task.actualTime) * 100) + '%'
-                        : '—';
                     const typeMap = { accumulative: '📈', goal: '🎯', ahead: '⏭️' };
                     const typeLabel = task.taskType ? (typeMap[task.taskType] || '') : '';
                     const ledgerLabel = (() => {
@@ -3284,13 +3300,12 @@
                             <td style="text-align: right; padding: 8px;">${plannedDisplay}</td>
                             <td style="text-align: right; padding: 8px;">${actualDisplay}</td>
                             <td style="text-align: right; padding: 8px; ${diffStyle}">${diffDisplay}</td>
-                            <td style="text-align: right; padding: 8px; color: var(--text-secondary);">${taskRatio}</td>
                         </tr>
                     `;
                 });
 
                 tableHtml += '</tbody></table>';
-                if (period !== 'week') {
+                if (period === 'today') {
                     statsTable.innerHTML = tableHtml;
                     ncEl.textContent = nonContinuousTasks.length > 0
                         ? `另有 ${nonContinuousTasks.length} 個非連續任務已完成（未計入時間統計）`
@@ -3333,29 +3348,47 @@
                     catEl.innerHTML = '';
                 }
 
-                // 每日趨勢圖（僅本週模式）：預定時間／實際時間折線圖
+                // 每日趨勢圖（本週／本月模式）：預定時間／實際時間折線圖，日期名稱融入當日提前/準時/超時 emoji
                 const trendEl = document.getElementById('dailyTrendChart');
-                if (period === 'week') {
-                    const dayNames = ['一', '二', '三', '四', '五', '六', '日'];
-                    const dailyPlanned = [0, 0, 0, 0, 0, 0, 0];
-                    const dailyActual  = [0, 0, 0, 0, 0, 0, 0];
-
+                if (period === 'week' || period === 'month') {
+                    const dayStats = {};
                     stats.tasks.forEach(t => {
-                        const dateStr = t.completedDate
-                            ? t.completedDate + 'T00:00:00'
-                            : (t.completedAt || null);
-                        if (!dateStr) return;
-                        const d = new Date(dateStr);
-                        const dow = ((d.getDay() - 1) + 7) % 7;
-                        dailyPlanned[dow] += (t.plannedTime || 0);
-                        dailyActual[dow]  += (t.actualTime  || 0);
+                        const day = t.completedDate || (t.completedAt ? t.completedAt.split('T')[0] : null);
+                        if (!day) return;
+                        if (!dayStats[day]) dayStats[day] = { actual: 0, planned: 0 };
+                        dayStats[day].actual  += (t.actualTime  || 0);
+                        dayStats[day].planned += (t.plannedTime || 0);
                     });
+
+                    const days = period === 'week' ? 7 : 30;
+                    const today = new Date();
+                    const dayLabels = [];
+                    const dailyPlanned = [];
+                    const dailyActual = [];
+
+                    for (let i = days - 1; i >= 0; i--) {
+                        const d = new Date(today);
+                        d.setDate(d.getDate() - i);
+                        const key = localDateStr(d);
+                        const ds = dayStats[key];
+                        const planned = ds ? ds.planned : 0;
+                        const actual = ds ? ds.actual : 0;
+                        const symbol = (ds && ds.planned > 0) ? getTimingSymbol(ds.actual - ds.planned) : '';
+                        dayLabels.push({
+                            date: `${d.getMonth() + 1}/${d.getDate()}`,
+                            symbol,
+                            planned,
+                            actual,
+                        });
+                        dailyPlanned.push(planned);
+                        dailyActual.push(actual);
+                    }
 
                     const maxVal = Math.max(...dailyPlanned, ...dailyActual, 1);
                     const chartW = 700, chartH = 200;
                     const padL = 10, padR = 10, padTop = 14, padBottom = 30;
                     const plotW = chartW - padL - padR, plotH = chartH - padTop - padBottom;
-                    const stepX = plotW / (dayNames.length - 1);
+                    const stepX = plotW / (days - 1);
                     const xAt = i => padL + i * stepX;
                     const yAt = v => padTop + (1 - v / maxVal) * plotH;
 
@@ -3365,8 +3398,16 @@
 
                     const toCircles = (arr, color, label) => arr.map((v, i) => `
                         <circle cx="${xAt(i)}" cy="${yAt(v)}" r="3.5" fill="${color}">
-                            <title>週${dayNames[i]}${label}：${v}分</title>
+                            <title>${dayLabels[i].date}${label}：${v}分</title>
                         </circle>`).join('');
+
+                    // 30天模式下每點都有標籤會太擠，僅每 4 天顯示一次日期文字（首尾必顯示）
+                    const labelStep = period === 'month' ? 4 : 1;
+                    const xLabels = dayLabels.map((dl, i) => {
+                        if (i % labelStep !== 0 && i !== days - 1) return '';
+                        const text = dl.symbol ? `${dl.date} ${dl.symbol}` : dl.date;
+                        return `<text x="${xAt(i)}" y="${chartH - 8}" font-size="${period === 'month' ? 10 : 12}" fill="var(--text-secondary)" text-anchor="middle">${text}</text>`;
+                    }).join('');
 
                     let trendHtml = `<div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">每日預定／實際時間（分鐘）</div>
                         <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%; height:auto; display:block;">
@@ -3375,55 +3416,18 @@
                             <polyline points="${toPoints(dailyActual)}" fill="none" stroke="${actualColor}" stroke-width="2"></polyline>
                             ${toCircles(dailyPlanned, plannedColor, '預定')}
                             ${toCircles(dailyActual, actualColor, '實際')}
-                            ${dayNames.map((name, i) => `<text x="${xAt(i)}" y="${chartH - 8}" font-size="12" fill="var(--text-secondary)" text-anchor="middle">週${name}</text>`).join('')}
+                            ${xLabels}
                         </svg>`;
 
                     trendHtml += `<div style="margin-top:6px; font-size:0.72rem; color:var(--text-secondary);">
                         <span style="color:${plannedColor};">●</span> 預定時間&nbsp;&nbsp;
-                        <span style="color:${actualColor};">●</span> 實際時間
+                        <span style="color:${actualColor};">●</span> 實際時間&nbsp;&nbsp;
+                        ⏩ 提前完成&nbsp;&nbsp;✅ 準時&nbsp;&nbsp;⚠️ 超時
                     </div>`;
                     trendEl.innerHTML = trendHtml;
                 } else {
                     trendEl.innerHTML = '';
                 }
-
-                // 日曆視圖
-                const calendarEl = document.getElementById('calendarView');
-                const dayStats = {};
-                stats.tasks.forEach(t => {
-                    const day = t.completedDate || (t.completedAt ? t.completedAt.split('T')[0] : null);
-                    if (!day) return;
-                    if (!dayStats[day]) dayStats[day] = { actual: 0, planned: 0 };
-                    dayStats[day].actual  += (t.actualTime  || 0);
-                    dayStats[day].planned += (t.plannedTime || 0);
-                });
-
-                const calToday = new Date();
-                const calDays = period === 'today' ? 1 : 7;
-                let calHtml = `<div style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:8px;">📅 日曆視圖</div>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">`;
-
-                for (let i = calDays - 1; i >= 0; i--) {
-                    const d = new Date(calToday);
-                    d.setDate(d.getDate() - i);
-                    const key = localDateStr(d);
-                    const ds = dayStats[key];
-                    let symbol = '—';
-                    if (ds && ds.planned > 0) {
-                        symbol = getTimingSymbol(ds.actual - ds.planned);
-                    }
-                    const label = `${d.getMonth() + 1}/${d.getDate()}`;
-                    calHtml += `<div style="text-align:center;min-width:48px;padding:6px 4px;background:var(--bg-tertiary);border-radius:6px;">
-                        <div style="font-size:0.72rem;color:var(--text-secondary);">${label}</div>
-                        <div style="font-size:1.3rem;line-height:1.6;">${symbol}</div>
-                        ${ds ? `<div style="font-size:0.65rem;color:var(--text-secondary);">${ds.actual}分</div>` : ''}
-                    </div>`;
-                }
-                calHtml += `</div>
-                    <div style="margin-top:6px;font-size:0.75rem;color:var(--text-secondary);">
-                        ⏩ 提前完成（少10分以上）&nbsp;&nbsp;✅ 準時（±10分）&nbsp;&nbsp;⚠️ 超時（多10分以上）
-                    </div>`;
-                calendarEl.innerHTML = calHtml;
             }
 
             duplicateTask(taskId) {

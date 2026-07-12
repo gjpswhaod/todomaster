@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todomaster-v5.1.3';
+const CACHE_NAME = 'todomaster-v5.2';
 const REPO = '/todomaster';
 const ASSETS = [
   `${REPO}/TodoMaster.html`,
