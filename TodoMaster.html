@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.0 - 任務管理工具</title>
+    <title>TodoMaster v5.1.3 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -37,7 +37,6 @@
             --accent-primary: #4a9eff;
             --accent-secondary: #ff6b6b;
             --accent-success: #51cf66;
-            --accent-warning: #ffd43b;
             --category-career: #4a9eff;
             --category-recharge: #a78bfa;
             --category-life: #34d399;
@@ -381,7 +380,6 @@
             gap: 6px;
             user-select: none;
         }
-        .time-section.drag-over { background: rgba(99,179,237,0.07); border-radius: 8px; }
         .section-time-total {
             font-size: 0.72rem;
             font-weight: 400;
@@ -513,17 +511,6 @@
             border-radius: 3px;
             font-size: 0.75rem;
             color: var(--text-secondary);
-        }
-
-        .task-actions {
-            display: flex;
-            gap: 6px;
-            flex-direction: column;
-        }
-
-        .task-actions-row {
-            display: flex;
-            gap: 6px;
         }
 
         /* 模態框 */
@@ -829,7 +816,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.0';
+        const APP_VERSION = 'v5.1.3';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -850,7 +837,7 @@
         }
         function getTaskPlannedMinutes(task) {
             if (task.estimatedTime === 'non-continuous') return 0;
-            if (task.estimatedTime === '30plus' && task.blocks) return task.blocks * 30;
+            if (task.estimatedTime === '30plus') return task.blocks ? task.blocks * 30 : 45;
             const estimatedMap = { '10min': 10, '30min': 30 };
             return estimatedMap[task.estimatedTime] ?? 0;
         }
@@ -858,6 +845,17 @@
             const hrs = minutes / 60;
             const hrsText = Number.isInteger(hrs) ? `${hrs}` : hrs.toFixed(1);
             return `${hrsText} 小時`;
+        }
+        function dateAtMidnight(dateStr) {
+            if (!dateStr || dateStr === '9999-12-31') return null;
+            const d = new Date(dateStr);
+            d.setHours(0, 0, 0, 0);
+            return d;
+        }
+        function getTimingSymbol(diffMinutes) {
+            if (diffMinutes < -10) return '⏩';
+            if (diffMinutes > 10) return '⚠️';
+            return '✅';
         }
 
 </script>
@@ -1660,12 +1658,10 @@
                     const rescheduleAllBtn = document.getElementById('rescheduleAllBtn');
                     if (rescheduleAllBtn) {
                         rescheduleAllBtn.addEventListener('click', () => {
-                            const todayStr = localDateStr();
-                            const todayMidnight = getTodayMidnight();
                             const overdueTasks = this.tasks.filter(t => {
-                                if (!t.date || t.date === '9999-12-31' || t.completed) return false;
-                                const d = new Date(t.date); d.setHours(0,0,0,0);
-                                return d < todayMidnight;
+                                if (t.completed) return false;
+                                const d = dateAtMidnight(t.date);
+                                return d && d < todayMidnight;
                             });
                             const affectedGroupIds = new Set();
                             overdueTasks.forEach(t => {
@@ -1684,6 +1680,27 @@
                 }
 
                 let todayMinutes = 0, tomorrowMinutes = 0, dayAfterMinutes = 0;
+                let todayCompletedMinutes = 0, tomorrowCompletedMinutes = 0, dayAfterCompletedMinutes = 0;
+
+                // 已預定/完成時數統計一律以 this.tasks 計算，不受「顯示/隱藏已完成」篩選影響
+                if (isSectionView) {
+                    this.tasks.forEach(task => {
+                        if (task.compressed) return;
+                        const taskDateObj = dateAtMidnight(task.date);
+                        const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
+                        if (isOverdue) return;
+                        if (task.date === todayStr) {
+                            todayMinutes += getTaskPlannedMinutes(task);
+                            if (task.completed) todayCompletedMinutes += getTaskPlannedMinutes(task);
+                        } else if (task.date === tomorrowStr) {
+                            tomorrowMinutes += getTaskPlannedMinutes(task);
+                            if (task.completed) tomorrowCompletedMinutes += getTaskPlannedMinutes(task);
+                        } else if (task.date === dayAfterStr) {
+                            dayAfterMinutes += getTaskPlannedMinutes(task);
+                            if (task.completed) dayAfterCompletedMinutes += getTaskPlannedMinutes(task);
+                        }
+                    });
+                }
 
                 filtered.forEach(task => {
                     // 壓縮任務：不顯示卡片，只在時間統計呈現
@@ -1900,19 +1917,16 @@
 
                     // 三區塊模式：依日期分配至對應 section list
                     if (isSectionView) {
-                        const taskDateObj = (task.date && task.date !== '9999-12-31') ? (() => { const d = new Date(task.date); d.setHours(0,0,0,0); return d; })() : null;
+                        const taskDateObj = dateAtMidnight(task.date);
                         const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
                         if (isOverdue) {
                             sectionOverdueList.appendChild(li);
                         } else if (task.date === todayStr) {
                             sectionTodayList.appendChild(li);
-                            if (!task.completed) todayMinutes += getTaskPlannedMinutes(task);
                         } else if (task.date === tomorrowStr) {
                             sectionTomorrowList.appendChild(li);
-                            if (!task.completed) tomorrowMinutes += getTaskPlannedMinutes(task);
                         } else if (task.date === dayAfterStr) {
                             sectionDayAfterList.appendChild(li);
-                            if (!task.completed) dayAfterMinutes += getTaskPlannedMinutes(task);
                         } else {
                             sectionLaterList.appendChild(li);
                         }
@@ -1923,12 +1937,12 @@
 
                 if (isSectionView) {
                     [
-                        { id: 'section-today-total', minutes: todayMinutes },
-                        { id: 'section-tomorrow-total', minutes: tomorrowMinutes },
-                        { id: 'section-dayafter-total', minutes: dayAfterMinutes }
-                    ].forEach(({ id, minutes }) => {
+                        { id: 'section-today-total', total: todayMinutes, completed: todayCompletedMinutes },
+                        { id: 'section-tomorrow-total', total: tomorrowMinutes, completed: tomorrowCompletedMinutes },
+                        { id: 'section-dayafter-total', total: dayAfterMinutes, completed: dayAfterCompletedMinutes }
+                    ].forEach(({ id, total, completed }) => {
                         const el = document.getElementById(id);
-                        if (el) el.textContent = minutes > 0 ? `（已預定${formatDuration(minutes)}）` : '';
+                        if (el) el.textContent = total > 0 ? `（已預定${formatDuration(total)}，完成${formatDuration(completed)}，剩餘${formatDuration(total - completed)}）` : '';
                     });
                 }
 
@@ -2012,23 +2026,17 @@
             updateStats() {
                 const statsContainer = document.getElementById('statsContainer');
                 const allTasks = this.tasks.filter(t => !t.compressed);
+                const todayStr = localDateStr();
+                const todayMidnight = getTodayMidnight();
 
                 const stats = {
                     total: allTasks.length,
                     completed: allTasks.filter(t => t.completed).length,
-                    today: allTasks.filter(t => {
-                        if (!t.date || t.date === '9999-12-31') return false;
-                        const taskDate = new Date(t.date);
-                        const today = new Date();
-                        return taskDate.toDateString() === today.toDateString();
-                    }).length,
+                    today: allTasks.filter(t => t.date === todayStr).length,
                     overdue: allTasks.filter(t => {
-                        if (!t.date || t.date === '9999-12-31' || t.completed) return false;
-                        const taskDate = new Date(t.date);
-                        taskDate.setHours(0, 0, 0, 0);
-                        const todayMidnight = new Date();
-                        todayMidnight.setHours(0, 0, 0, 0);
-                        return taskDate < todayMidnight;
+                        if (t.completed) return false;
+                        const taskDate = dateAtMidnight(t.date);
+                        return taskDate && taskDate < todayMidnight;
                     }).length
                 };
 
@@ -2148,9 +2156,7 @@
                 const updateBlockCalc = () => {
                     const n = parseInt(document.getElementById('blockSelect').value) || 2;
                     const mins = n * 30;
-                    const hrs = mins / 60;
-                    const hrsText = Number.isInteger(hrs) ? `${hrs} 小時` : `${hrs.toFixed(1)} 小時`;
-                    document.getElementById('blockTimeCalc').textContent = `= ${mins} 分鐘（${hrsText}）`;
+                    document.getElementById('blockTimeCalc').textContent = `= ${mins} 分鐘（${formatDuration(mins)}）`;
                 };
                 document.getElementById('blockSelect').addEventListener('input', updateBlockCalc);
 
@@ -2165,12 +2171,6 @@
                     startDate: document.getElementById('taskDate').value,
                     interval: parseInt(document.getElementById('recurringDays').value) || 1
                 });
-                const addDays = (dateStr, days) => {
-                    if (!dateStr) return '';
-                    const d = new Date(dateStr + 'T00:00:00');
-                    d.setDate(d.getDate() + days);
-                    return d.toISOString().slice(0, 10);
-                };
                 const daysDiff = (a, b) => {
                     if (!a || !b) return null;
                     const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
@@ -2182,7 +2182,7 @@
                     const count = parseInt(document.getElementById('recurringCount').value);
                     if (!startDate || !count || count < 1) return;
                     _recurringCalcLock = true;
-                    document.getElementById('recurringUntilDate').value = addDays(startDate, interval * (count - 1));
+                    document.getElementById('recurringUntilDate').value = addDaysToDate(startDate, interval * (count - 1));
                     _recurringCalcLock = false;
                 };
                 const syncCountFromUntilDate = () => {
@@ -2326,9 +2326,7 @@
                             if (section) {
                                 const sectionType = section.dataset.section;
                                 const todayStr = localDateStr();
-                                const tomorrowDate = new Date();
-                                tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-                                const tomorrowStr = localDateStr(tomorrowDate);
+                                const tomorrowStr = addDaysToDate(todayStr, 1);
                                 const task = this.getTaskById(taskId);
 
                                 if (sectionType === 'today' && task && task.date !== todayStr) {
@@ -2574,18 +2572,7 @@
 
                 // 設置預計時間提示
                 const estimateTimeHint = document.getElementById('estimateTimeHint');
-                let estimateTime;
-
-                if (task.estimatedTime === '30plus' && task.blocks) {
-                    estimateTime = task.blocks * 30;
-                } else {
-                    const estimateTimeMap = {
-                        '10min': 10,
-                        '30min': 30,
-                        '30plus': 45
-                    };
-                    estimateTime = estimateTimeMap[task.estimatedTime];
-                }
+                const estimateTime = getTaskPlannedMinutes(task);
 
                 estimateTimeHint.textContent = `預計時間：${estimateTime} 分鐘`;
 
@@ -2624,7 +2611,6 @@
 
                 // 保存原始複選框狀態，以便用戶取消時恢復
                 const originalModal = document.getElementById('completeTimeModal');
-                const originalOnclose = originalModal.onclick;
                 originalModal.onclick = (e) => {
                     if (e.target === originalModal) {
                         // 用戶點擊外部取消，恢復複選框狀態
@@ -2690,13 +2676,13 @@
                         this.updateTask(taskId, updates);
                         if (task.recurring && task.recurring.enabled) this.createNextRecurringTask(task);
                         closeModal('blockTimeModal');
-                        const diffSymbol = runningActual < totalPlanned - 10 ? ' ⏩' : runningActual > totalPlanned + 10 ? ' ⚠️' : ' ✅';
+                        const diffSymbol = ' ' + getTimingSymbol(runningActual - totalPlanned);
                         this.showNotification(`✅ 全部 ${totalBlocks} blocks 完成！總用時 ${runningActual}分 vs 預計 ${totalPlanned}分${diffSymbol}`);
                     } else {
                         this.updateTask(taskId, updates);
                         closeModal('blockTimeModal');
                         const diff = minutes - BLOCK_ESTIMATE;
-                        const diffSymbol = diff < -10 ? ` ⏩ 節省 ${Math.abs(diff)}分` : diff > 10 ? ` ⚠️ 超時 ${diff}分` : ' ✅';
+                        const diffSymbol = diff < -10 ? ` ⏩ 節省 ${Math.abs(diff)}分` : diff > 10 ? ` ⚠️ 超時 ${diff}分` : ` ${getTimingSymbol(diff)}`;
                         this.showNotification(`Block ${newCompleted}/${totalBlocks} 完成，用時 ${minutes}分${diffSymbol}`);
                     }
                     this.updateUI();
@@ -2799,12 +2785,8 @@
             }
 
             calcTimeBalance(task, actualTime) {
-                const estimatedMap = { '10min': 10, '30min': 30 };
                 if (task.estimatedTime === 'non-continuous') return null;
-                const planned = task.estimatedTime === '30plus' && task.blocks
-                    ? task.blocks * 30
-                    : (estimatedMap[task.estimatedTime] ?? null);
-                if (planned === null) return null;
+                const planned = getTaskPlannedMinutes(task);
                 const type = task.taskType || 'goal';
                 if (type === 'accumulative') return actualTime - planned;
                 if (type === 'goal')         return planned - actualTime;
@@ -2819,10 +2801,7 @@
                     count++;
 
                     // 預計時間（分鐘）
-                    const estimatedMap = { '10min': 10, '30min': 30 };
-                    const plannedTime = task.estimatedTime === '30plus' && task.blocks
-                        ? task.blocks * 30
-                        : (estimatedMap[task.estimatedTime] ?? null);
+                    const plannedTime = getTaskPlannedMinutes(task);
 
                     // 時間收支（優先用任務完成時已計算的值）
                     let timeBalance = null;
@@ -2925,14 +2904,6 @@
                     }
                 });
             }
-
-
-
-
-
-
-
-
 
             // ===== 備份功能 (下載/上傳) =====
 
@@ -3165,7 +3136,7 @@
                             throw writeErr;
                         }
                     } else {
-                        // 降級：直接下載（與 downloadBackup 相同機制）
+                        // 降級：不支援 showSaveFilePicker 時直接觸發瀏覽器下載
                         const url = URL.createObjectURL(blob);
                         const link = document.createElement('a');
                         link.href = url;
@@ -3206,7 +3177,6 @@
                 }
             }
 
-
             renderStats(period) {
                 const now = new Date();
                 let startDate;
@@ -3238,8 +3208,7 @@
                 const stats = { plannedTime: 0, actualTime: 0, tasks: [] };
 
                 timedTasks.forEach(task => {
-                    const estimatedMap = { '10min': 10, '30min': 30, '30plus': task.blocks ? task.blocks * 30 : 45 };
-                    const planned  = task.plannedTime ?? (estimatedMap[task.estimatedTime] || 0);
+                    const planned  = task.plannedTime ?? getTaskPlannedMinutes(task);
                     const actual   = task.actualTime  ?? planned;
                     const tb       = task.timeBalance ?? this.calcTimeBalance(task, actual);
                     stats.plannedTime += planned;
@@ -3364,11 +3333,12 @@
                     catEl.innerHTML = '';
                 }
 
-                // 每日趨勢圖（僅本週模式）
+                // 每日趨勢圖（僅本週模式）：預定時間／實際時間折線圖
                 const trendEl = document.getElementById('dailyTrendChart');
                 if (period === 'week') {
                     const dayNames = ['一', '二', '三', '四', '五', '六', '日'];
-                    const dailyBalance = [0, 0, 0, 0, 0, 0, 0];
+                    const dailyPlanned = [0, 0, 0, 0, 0, 0, 0];
+                    const dailyActual  = [0, 0, 0, 0, 0, 0, 0];
 
                     stats.tasks.forEach(t => {
                         const dateStr = t.completedDate
@@ -3377,36 +3347,40 @@
                         if (!dateStr) return;
                         const d = new Date(dateStr);
                         const dow = ((d.getDay() - 1) + 7) % 7;
-                        if (t.timeBalance != null) dailyBalance[dow] += t.timeBalance;
-                    });
-                    const maxAbs = Math.max(...dailyBalance.map(Math.abs), 1);
-                    const halfH = 70;
-
-                    let trendHtml = `<div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">每日時間收支（分鐘）</div>
-                        <div style="display:flex; gap:4px;">`;
-
-                    dayNames.forEach((name, i) => {
-                        const bal = dailyBalance[i];
-                        const posH = bal > 0 ? Math.round((bal / maxAbs) * halfH) : 0;
-                        const negH = bal < 0 ? Math.round((Math.abs(bal) / maxAbs) * halfH) : 0;
-                        trendHtml += `<div style="flex:1; display:flex; flex-direction:column; align-items:center;">
-                            <div style="height:18px; font-size:0.65rem; color:#51cf66; display:flex; align-items:flex-end; justify-content:center;">${bal > 0 ? '+' + bal : ''}</div>
-                            <div style="width:100%; height:${halfH}px; position:relative;">
-                                ${posH > 0 ? `<div style="position:absolute;bottom:0;left:0;right:0;height:${posH}px;background:#51cf66;border-radius:3px 3px 0 0;opacity:0.85;"></div>` : ''}
-                            </div>
-                            <div style="width:100%; height:1px; background:var(--text-secondary); opacity:0.3;"></div>
-                            <div style="width:100%; height:${halfH}px; position:relative;">
-                                ${negH > 0 ? `<div style="position:absolute;top:0;left:0;right:0;height:${negH}px;background:#ff6b6b;border-radius:0 0 3px 3px;opacity:0.85;"></div>` : ''}
-                            </div>
-                            <div style="height:18px; font-size:0.65rem; color:#ff6b6b; display:flex; align-items:flex-start; justify-content:center;">${bal < 0 ? bal : ''}</div>
-                            <div style="font-size:0.8rem; color:var(--text-secondary); margin-top:2px;">週${name}</div>
-                        </div>`;
+                        dailyPlanned[dow] += (t.plannedTime || 0);
+                        dailyActual[dow]  += (t.actualTime  || 0);
                     });
 
-                    trendHtml += '</div>';
+                    const maxVal = Math.max(...dailyPlanned, ...dailyActual, 1);
+                    const chartW = 700, chartH = 200;
+                    const padL = 10, padR = 10, padTop = 14, padBottom = 30;
+                    const plotW = chartW - padL - padR, plotH = chartH - padTop - padBottom;
+                    const stepX = plotW / (dayNames.length - 1);
+                    const xAt = i => padL + i * stepX;
+                    const yAt = v => padTop + (1 - v / maxVal) * plotH;
+
+                    const toPoints = arr => arr.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ');
+                    const plannedColor = '#ffa94d';
+                    const actualColor = 'var(--accent-primary)';
+
+                    const toCircles = (arr, color, label) => arr.map((v, i) => `
+                        <circle cx="${xAt(i)}" cy="${yAt(v)}" r="3.5" fill="${color}">
+                            <title>週${dayNames[i]}${label}：${v}分</title>
+                        </circle>`).join('');
+
+                    let trendHtml = `<div style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:8px;">每日預定／實際時間（分鐘）</div>
+                        <svg viewBox="0 0 ${chartW} ${chartH}" style="width:100%; height:auto; display:block;">
+                            <line x1="${padL}" y1="${padTop + plotH}" x2="${chartW - padR}" y2="${padTop + plotH}" stroke="var(--text-secondary)" stroke-opacity="0.3" stroke-width="1"></line>
+                            <polyline points="${toPoints(dailyPlanned)}" fill="none" stroke="${plannedColor}" stroke-width="2"></polyline>
+                            <polyline points="${toPoints(dailyActual)}" fill="none" stroke="${actualColor}" stroke-width="2"></polyline>
+                            ${toCircles(dailyPlanned, plannedColor, '預定')}
+                            ${toCircles(dailyActual, actualColor, '實際')}
+                            ${dayNames.map((name, i) => `<text x="${xAt(i)}" y="${chartH - 8}" font-size="12" fill="var(--text-secondary)" text-anchor="middle">週${name}</text>`).join('')}
+                        </svg>`;
+
                     trendHtml += `<div style="margin-top:6px; font-size:0.72rem; color:var(--text-secondary);">
-                        <span style="color:#51cf66;">■</span> 提前完成（賺到時間）&nbsp;&nbsp;
-                        <span style="color:#ff6b6b;">■</span> 超時（虧損時間）
+                        <span style="color:${plannedColor};">●</span> 預定時間&nbsp;&nbsp;
+                        <span style="color:${actualColor};">●</span> 實際時間
                     </div>`;
                     trendEl.innerHTML = trendHtml;
                 } else {
@@ -3436,10 +3410,7 @@
                     const ds = dayStats[key];
                     let symbol = '—';
                     if (ds && ds.planned > 0) {
-                        const diff = ds.actual - ds.planned;
-                        if (diff < -10) symbol = '⏩';
-                        else if (diff > 10) symbol = '⚠️';
-                        else symbol = '✅';
+                        symbol = getTimingSymbol(ds.actual - ds.planned);
                     }
                     const label = `${d.getMonth() + 1}/${d.getDate()}`;
                     calHtml += `<div style="text-align:center;min-width:48px;padding:6px 4px;background:var(--bg-tertiary);border-radius:6px;">
