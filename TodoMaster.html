@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.2 - 任務管理工具</title>
+    <title>TodoMaster v5.3 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -440,6 +440,11 @@
             word-break: break-word;
         }
 
+        .task-pin-icon {
+            font-size: 0.9rem;
+            flex-shrink: 0;
+        }
+
         .task-category {
             display: inline-flex;
             align-items: center;
@@ -816,7 +821,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.2';
+        const APP_VERSION = 'v5.3';
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -884,6 +889,14 @@
                     <span class="filter-icon">✅</span>
                     <span id="completedVisibilityText">顯示已完成</span>
                 </button>
+                <button class="filter-item" id="statsBtn">
+                    <span class="filter-icon">📊</span>
+                    時間統計
+                </button>
+                <button class="filter-item" id="compressBtn">
+                    <span class="filter-icon">📦</span>
+                    壓縮任務
+                </button>
             </div>
 
             <div class="sidebar-section">
@@ -915,18 +928,6 @@
             <div class="sidebar-section" id="groupContainer" style="display: none;">
                 <div class="sidebar-section-title">迴圈群組</div>
                 <div class="filter-list"></div>
-            </div>
-
-            <div class="sidebar-section">
-                <div class="sidebar-section-title">選項</div>
-                <button class="filter-item" id="statsBtn">
-                    <span class="filter-icon">📊</span>
-                    時間統計
-                </button>
-                <button class="filter-item" id="compressBtn">
-                    <span class="filter-icon">📦</span>
-                    壓縮任務
-                </button>
             </div>
 
             <div class="sidebar-section">
@@ -1019,6 +1020,24 @@
                             <button type="button" class="btn btn-secondary btn-small" id="nextSatBtn">下週六</button>
                             <button type="button" class="btn btn-secondary btn-small" id="nextSunBtn">下週日</button>
                         </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>釘選</label>
+                    <div class="radio-group">
+                        <label class="radio-item">
+                            <input type="radio" name="pinned" value="" checked>
+                            <span>無</span>
+                        </label>
+                        <label class="radio-item">
+                            <input type="radio" name="pinned" value="top">
+                            <span>📌 置頂</span>
+                        </label>
+                        <label class="radio-item">
+                            <input type="radio" name="pinned" value="bottom">
+                            <span>📌 置底</span>
+                        </label>
                     </div>
                 </div>
 
@@ -1502,6 +1521,9 @@
                     filtered = filtered.filter(t => !t.completed);
                 }
 
+                // 置頂/置底：在同一天內永遠排最前/最後
+                const pinRank = t => t.pinned === 'top' ? -1 : t.pinned === 'bottom' ? 1 : 0;
+
                 // 排序：群組視圖按 groupOrder；固定模式按手動 order；拖曳模式按日期
                 if (this.currentFilter.startsWith('group:')) {
                     filtered.sort((a, b) => {
@@ -1511,6 +1533,8 @@
                 } else if (this.sortMode === 'fixed') {
                     filtered.sort((a, b) => {
                         if (a.completed !== b.completed) return a.completed ? 1 : -1;
+                        const pr = pinRank(a) - pinRank(b);
+                        if (pr !== 0) return pr;
                         return (a.order ?? 9999) - (b.order ?? 9999);
                     });
                 } else {
@@ -1519,6 +1543,8 @@
                         if (a.date && b.date) {
                             const d = new Date(a.date) - new Date(b.date);
                             if (d !== 0) return d;
+                            const pr = pinRank(a) - pinRank(b);
+                            if (pr !== 0) return pr;
                         }
                         return (a.order ?? 9999) - (b.order ?? 9999);
                     });
@@ -1755,6 +1781,7 @@
                     let html = `
                         <div class="task-header">
                             <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
+                            ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
                             <span class="task-title">${this.escapeHtml(task.title)}</span>
                             <span class="task-category ${task.category}">
                                 ${categoryEmojis[task.category]} ${task.category}
@@ -1766,7 +1793,7 @@
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 <div class="task-meta-item">${timeEmojis[task.estimatedTime]} ${estimatedDisplay}</div>
                                 ${task.actualTime ? `<div class="task-meta-item">✓ ${task.actualTime}分鐘</div>` : ''}
-                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}</div>` : ''}
+                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
                             </div>
                             ${task.tags && task.tags.length > 0 ? `
                                 <div class="task-tags">
@@ -2428,6 +2455,9 @@
                 document.getElementById('taskDate').value = task.date || '';
                 document.getElementById('dateInputGroup').style.display = dateMode === 'scheduled' ? 'block' : 'none';
 
+                // 設置釘選狀態
+                document.querySelector(`input[name="pinned"][value="${task.pinned || ''}"]`).checked = true;
+
                 // 設置預計時間和 blocks
                 document.querySelector(`input[name="estimatedTime"][value="${task.estimatedTime}"]`).checked = true;
 
@@ -2751,14 +2781,15 @@
                     category: completedTask.category,
                     taskType: completedTask.taskType || 'goal',
                     tags: completedTask.tags ? [...completedTask.tags] : [],
-                    recurring: { ...completedTask.recurring },
+                    recurring: { ...completedTask.recurring, completedCount: (completedTask.recurring.completedCount || 0) + 1 },
                     groupId: completedTask.groupId || null,
                     groupName: completedTask.groupName || null,
                     groupCycleMode: completedTask.groupCycleMode || 'uniform',
                     groupDelayMode: completedTask.groupDelayMode || 'fixed',
                     groupOrder: newGroupOrder,
                     actualTime: null,
-                    nextStepNotes: null
+                    nextStepNotes: null,
+                    pinned: completedTask.pinned || null
                 };
 
                 this.addTask(newTask);
@@ -3393,8 +3424,8 @@
                     const yAt = v => padTop + (1 - v / maxVal) * plotH;
 
                     const toPoints = arr => arr.map((v, i) => `${xAt(i)},${yAt(v)}`).join(' ');
-                    const plannedColor = '#ffa94d';
-                    const actualColor = 'var(--accent-primary)';
+                    const plannedColor = '#51cf66';
+                    const actualColor = '#ff6b6b';
 
                     const toCircles = (arr, color, label) => arr.map((v, i) => `
                         <circle cx="${xAt(i)}" cy="${yAt(v)}" r="3.5" fill="${color}">
@@ -3440,7 +3471,8 @@
                     title: `${originalTask.title} (副本)`,
                     completed: false,
                     completedAt: null,
-                    order: this.tasks.length
+                    order: this.tasks.length,
+                    pinned: null
                 };
 
                 this.tasks.push(newTask);
@@ -3486,7 +3518,8 @@
                     groupId: null,
                     groupOrder: null,
                     actualTime: document.getElementById('actualTime').value ? parseInt(document.getElementById('actualTime').value) : null,
-                    nextStepNotes: null
+                    nextStepNotes: null,
+                    pinned: document.querySelector('input[name="pinned"]:checked')?.value || null
                 };
 
                 if (document.getElementById('taskRecurring').checked) {
