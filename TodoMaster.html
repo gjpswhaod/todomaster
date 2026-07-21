@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.3 - 任務管理工具</title>
+    <title>TodoMaster v5.3.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -424,6 +424,7 @@
             display: flex;
             align-items: center;
             gap: 12px;
+            flex-wrap: wrap;
         }
 
         .task-checkbox {
@@ -445,6 +446,14 @@
             flex-shrink: 0;
         }
 
+        .task-badges {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-left: auto;
+        }
+
         .task-category {
             display: inline-flex;
             align-items: center;
@@ -454,7 +463,6 @@
             font-weight: 600;
             text-transform: uppercase;
             width: fit-content;
-            margin-left: auto;
         }
 
         .task-category.career {
@@ -507,7 +515,6 @@
             display: flex;
             flex-wrap: wrap;
             gap: 4px;
-            margin-top: 8px;
         }
 
         .task-tag {
@@ -758,7 +765,7 @@
                 grid-template-columns: 1fr;
             }
 
-            .task-category {
+            .task-badges {
                 margin-left: 0;
             }
 
@@ -821,7 +828,20 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.3';
+        const APP_VERSION = 'v5.3.2';
+        const BLOCK_MINUTES = 30;
+        const CATEGORY_META = {
+            career: { emoji: '💼', label: '事業' },
+            recharge: { emoji: '⚡', label: '充電' },
+            life: { emoji: '🏠', label: '生活' },
+            review: { emoji: '🔍', label: '復盤' }
+        };
+        const TIME_META = {
+            '10min': { emoji: '⏱️', label: '10分鐘' },
+            '30min': { emoji: '⏲️', label: '30分鐘' },
+            '30plus': { emoji: '⏳', label: '30+分鐘' },
+            'non-continuous': { emoji: '🔀', label: '非連續' }
+        };
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -842,7 +862,7 @@
         }
         function getTaskPlannedMinutes(task) {
             if (task.estimatedTime === 'non-continuous') return 0;
-            if (task.estimatedTime === '30plus') return task.blocks ? task.blocks * 30 : 45;
+            if (task.estimatedTime === '30plus') return task.blocks ? task.blocks * BLOCK_MINUTES : 45;
             const estimatedMap = { '10min': 10, '30min': 30 };
             return estimatedMap[task.estimatedTime] ?? 0;
         }
@@ -857,10 +877,19 @@
             d.setHours(0, 0, 0, 0);
             return d;
         }
+        function isTaskOverdue(task, todayMidnight) {
+            const due = dateAtMidnight(task.date);
+            return !task.completed && due && due < todayMidnight;
+        }
         function getTimingSymbol(diffMinutes) {
             if (diffMinutes < -10) return '⏩';
             if (diffMinutes > 10) return '⚠️';
             return '✅';
+        }
+        function bindEnterToClick(inputId, btnId) {
+            document.getElementById(inputId).onkeypress = (e) => {
+                if (e.key === 'Enter') document.getElementById(btnId).click();
+            };
         }
 
 </script>
@@ -1682,11 +1711,7 @@
                     const rescheduleAllBtn = document.getElementById('rescheduleAllBtn');
                     if (rescheduleAllBtn) {
                         rescheduleAllBtn.addEventListener('click', () => {
-                            const overdueTasks = this.tasks.filter(t => {
-                                if (t.completed) return false;
-                                const d = dateAtMidnight(t.date);
-                                return d && d < todayMidnight;
-                            });
+                            const overdueTasks = this.tasks.filter(t => isTaskOverdue(t, todayMidnight));
                             const affectedGroupIds = new Set();
                             overdueTasks.forEach(t => {
                                 this.updateTask(t.id, { date: todayStr });
@@ -1711,9 +1736,7 @@
                     this.tasks.forEach(task => {
                         // 已壓縮任務一律視為已完成，且無逾期疑慮；缺少 date 的舊壓縮資料以 completedDate 近似定位
                         const bucketDate = task.date || (task.compressed ? task.completedDate : null);
-                        const taskDateObj = dateAtMidnight(task.date);
-                        const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
-                        if (isOverdue) return;
+                        if (isTaskOverdue(task, todayMidnight)) return;
                         if (bucketDate === todayStr) {
                             todayMinutes += getTaskPlannedMinutes(task);
                             if (task.completed) todayCompletedMinutes += getTaskPlannedMinutes(task);
@@ -1749,33 +1772,12 @@
 
                     li.dataset.taskId = task.id;
 
-                    const categoryEmojis = {
-                        career: '💼',
-                        recharge: '⚡',
-                        life: '🏠',
-                        review: '🔍'
-                    };
-
-                    const timeEmojis = {
-                        '10min': '⏱️',
-                        '30min': '⏲️',
-                        '30plus': '⏳',
-                        'non-continuous': '🔀'
-                    };
-
-                    const timeLabels = {
-                        '10min': '10分鐘',
-                        '30min': '30分鐘',
-                        '30plus': '30+分鐘',
-                        'non-continuous': '非連續'
-                    };
-
                     const dueStatus = this.getTaskDueStatus(task);
 
                     // 計算預計時間顯示
-                    let estimatedDisplay = timeLabels[task.estimatedTime];
+                    let estimatedDisplay = TIME_META[task.estimatedTime]?.label;
                     if (task.estimatedTime === '30plus' && task.blocks) {
-                        estimatedDisplay = `${task.blocks} blocks (${task.blocks * 30}分鐘)`;
+                        estimatedDisplay = `${task.blocks} blocks (${task.blocks * BLOCK_MINUTES}分鐘)`;
                     }
 
                     let html = `
@@ -1783,23 +1785,25 @@
                             <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
                             ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
                             <span class="task-title">${this.escapeHtml(task.title)}</span>
-                            <span class="task-category ${task.category}">
-                                ${categoryEmojis[task.category]} ${task.category}
-                            </span>
+                            <div class="task-badges">
+                                <span class="task-category ${task.category}">
+                                    ${CATEGORY_META[task.category]?.emoji} ${task.category}
+                                </span>
+                                ${task.tags && task.tags.length > 0 ? `
+                                    <div class="task-tags">
+                                        ${task.tags.map(tag => `<span class="task-tag">${this.escapeHtml(tag)}</span>`).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
                         </div>
                         <div class="task-content">
                             ${task.description ? `<div class="task-description">${this.escapeHtml(task.description)}</div>` : ''}
                             <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
-                                <div class="task-meta-item">${timeEmojis[task.estimatedTime]} ${estimatedDisplay}</div>
+                                <div class="task-meta-item">${TIME_META[task.estimatedTime]?.emoji} ${estimatedDisplay}</div>
                                 ${task.actualTime ? `<div class="task-meta-item">✓ ${task.actualTime}分鐘</div>` : ''}
                                 ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
                             </div>
-                            ${task.tags && task.tags.length > 0 ? `
-                                <div class="task-tags">
-                                    ${task.tags.map(tag => `<span class="task-tag">${this.escapeHtml(tag)}</span>`).join('')}
-                                </div>
-                            ` : ''}
                             ${task.nextStepNotes ? `
                                 <div style="margin-top: 8px; padding: 8px; background-color: var(--bg-tertiary); border-radius: 4px; border-left: 3px solid var(--accent-primary); font-size: 0.85rem; color: var(--text-secondary);">
                                     <strong>💡 下一步：</strong> ${this.escapeHtml(task.nextStepNotes)}
@@ -1943,9 +1947,7 @@
 
                     // 三區塊模式：依日期分配至對應 section list
                     if (isSectionView) {
-                        const taskDateObj = dateAtMidnight(task.date);
-                        const isOverdue = taskDateObj && !task.completed && taskDateObj < todayMidnight;
-                        if (isOverdue) {
+                        if (isTaskOverdue(task, todayMidnight)) {
                             sectionOverdueList.appendChild(li);
                         } else if (task.date === todayStr) {
                             sectionTodayList.appendChild(li);
@@ -1987,14 +1989,11 @@
             getTaskDueStatus(task) {
                 if (!task.date || task.completed) return { label: '', color: '' };
 
-                // 處理特殊日期值
-                if (task.date === '9999-12-31') {
+                const taskDate = dateAtMidnight(task.date);
+                if (!taskDate) {
                     return { label: '不限期', color: '#808080' };
                 }
-
-                const taskDate = new Date(task.date);
                 const today = getTodayMidnight();
-                taskDate.setHours(0, 0, 0, 0);
 
                 const diff = taskDate.getTime() - today.getTime();
                 const dayMs = 24 * 60 * 60 * 1000;
@@ -2059,11 +2058,7 @@
                     total: allTasks.length,
                     completed: allTasks.filter(t => t.completed).length,
                     today: allTasks.filter(t => t.date === todayStr).length,
-                    overdue: allTasks.filter(t => {
-                        if (t.completed) return false;
-                        const taskDate = dateAtMidnight(t.date);
-                        return taskDate && taskDate < todayMidnight;
-                    }).length
+                    overdue: allTasks.filter(t => isTaskOverdue(t, todayMidnight)).length
                 };
 
                 statsContainer.innerHTML = `
@@ -2181,7 +2176,7 @@
                 // Block 數量即時試算
                 const updateBlockCalc = () => {
                     const n = parseInt(document.getElementById('blockSelect').value) || 2;
-                    const mins = n * 30;
+                    const mins = n * BLOCK_MINUTES;
                     document.getElementById('blockTimeCalc').textContent = `= ${mins} 分鐘（${formatDuration(mins)}）`;
                 };
                 document.getElementById('blockSelect').addEventListener('input', updateBlockCalc);
@@ -2222,16 +2217,14 @@
                     document.getElementById('recurringCount').value = Math.floor(diff / interval) + 1;
                     _recurringCalcLock = false;
                 };
+                const resyncRecurringFields = () => {
+                    if (document.getElementById('recurringCount').value) syncUntilDateFromCount();
+                    else if (document.getElementById('recurringUntilDate').value) syncCountFromUntilDate();
+                };
                 document.getElementById('recurringCount').addEventListener('input', syncUntilDateFromCount);
                 document.getElementById('recurringUntilDate').addEventListener('change', syncCountFromUntilDate);
-                document.getElementById('recurringDays').addEventListener('input', () => {
-                    if (document.getElementById('recurringCount').value) syncUntilDateFromCount();
-                    else if (document.getElementById('recurringUntilDate').value) syncCountFromUntilDate();
-                });
-                document.getElementById('taskDate').addEventListener('change', () => {
-                    if (document.getElementById('recurringCount').value) syncUntilDateFromCount();
-                    else if (document.getElementById('recurringUntilDate').value) syncCountFromUntilDate();
-                });
+                document.getElementById('recurringDays').addEventListener('input', resyncRecurringFields);
+                document.getElementById('taskDate').addEventListener('change', resyncRecurringFields);
 
                 // 任務群組選項
                 document.getElementById('taskGroup').addEventListener('change', (e) => {
@@ -2595,7 +2588,7 @@
             }
 
 
-            openCompleteTimeModal(taskId, checkbox, isBlockCompletion = false) {
+            openCompleteTimeModal(taskId, checkbox) {
                 const task = this.getTaskById(taskId);
                 if (!task) return;
 
@@ -2634,19 +2627,13 @@
                 };
 
                 // 回車鍵確認
-                document.getElementById('completeTimeInput').onkeypress = (e) => {
-                    if (e.key === 'Enter') document.getElementById('confirmCompleteBtn').click();
-                };
+                bindEnterToClick('completeTimeInput', 'confirmCompleteBtn');
 
-                // 保存原始複選框狀態，以便用戶取消時恢復
+                // 保存原始複選框狀態，以便用戶點擊外部取消時恢復（實際關閉交由通用 backdrop-click handler 處理）
                 const originalModal = document.getElementById('completeTimeModal');
                 originalModal.onclick = (e) => {
-                    if (e.target === originalModal) {
-                        // 用戶點擊外部取消，恢復複選框狀態
-                        if (checkbox) {
-                            checkbox.checked = false;
-                        }
-                        originalModal.classList.remove('active');
+                    if (e.target === originalModal && checkbox) {
+                        checkbox.checked = false;
                     }
                 };
 
@@ -2683,7 +2670,7 @@
                 const task = this.getTaskById(taskId);
                 if (!task) return;
                 const totalBlocks = task.blocks;
-                const BLOCK_ESTIMATE = 30;
+                const BLOCK_ESTIMATE = BLOCK_MINUTES;
 
                 document.getElementById('blockTimeModalTitle').textContent = `Block ${newCompleted}/${totalBlocks} 完成！`;
                 document.getElementById('blockTimeModalHint').textContent = `本段預計：${BLOCK_ESTIMATE} 分鐘`;
@@ -2722,9 +2709,7 @@
                     const val = parseInt(document.getElementById('blockTimeInput').value);
                     confirmBlock(isNaN(val) || val < 0 ? BLOCK_ESTIMATE : val);
                 };
-                document.getElementById('blockTimeInput').onkeypress = (e) => {
-                    if (e.key === 'Enter') document.getElementById('blockTimeConfirmBtn').click();
-                };
+                bindEnterToClick('blockTimeInput', 'blockTimeConfirmBtn');
 
                 this.openModal('blockTimeModal');
             }
@@ -2913,24 +2898,19 @@
             setupQuickDateButtons() {
                 const today = new Date();
 
-                // 今天
-                document.getElementById('todayBtn').onclick = () => {
-                    document.getElementById('taskDate').value = localDateStr(today);
-                };
-
-                // 明天
-                document.getElementById('tomorrowBtn').onclick = () => {
-                    const date = new Date(today);
-                    date.setDate(date.getDate() + 1);
-                    document.getElementById('taskDate').value = localDateStr(date);
-                };
-
-                // 後天
-                document.getElementById('dayAfterBtn').onclick = () => {
-                    const date = new Date(today);
-                    date.setDate(date.getDate() + 2);
-                    document.getElementById('taskDate').value = localDateStr(date);
-                };
+                // 今天 / 明天 / 後天
+                const relativeDays = [
+                    { id: 'todayBtn', offset: 0 },
+                    { id: 'tomorrowBtn', offset: 1 },
+                    { id: 'dayAfterBtn', offset: 2 }
+                ];
+                relativeDays.forEach(({ id, offset }) => {
+                    document.getElementById(id).onclick = () => {
+                        const date = new Date(today);
+                        date.setDate(date.getDate() + offset);
+                        document.getElementById('taskDate').value = localDateStr(date);
+                    };
+                });
 
                 // 下週各日
                 const weekDays = [
@@ -3082,6 +3062,13 @@
                 return latest;
             }
 
+            _applyBackupData(latest) {
+                this.tasks = latest.data.tasks;
+                this.tags = latest.data.tags || [];
+                this.saveToStorage();
+                this.updateUI();
+            }
+
             async autoImportFromSyncFolder(handleOverride) {
                 try {
                     // 啟動時靜默同步：使用傳入的 handle（初次設定）或從 IndexedDB 載入
@@ -3116,10 +3103,7 @@
                     const localDate = localSyncDate ? new Date(localSyncDate) : new Date(0);
 
                     if (backupDate > localDate) {
-                        this.tasks = latest.data.tasks;
-                        this.tags = latest.data.tags || [];
-                        this.saveToStorage();
-                        this.updateUI();
+                        this._applyBackupData(latest);
                         const dateStr = backupDate.toLocaleDateString('zh-TW');
                         this.showNotification(`✅ 已同步最新資料（${dateStr}）`);
                     }
@@ -3152,11 +3136,8 @@
                     }
 
                     const dateStr = backupDate.toLocaleString('zh-TW');
-                    this.tasks = latest.data.tasks;
-                    this.tags = latest.data.tags || [];
-                    this.saveToStorage();
+                    this._applyBackupData(latest);
                     localStorage.setItem('todoSyncDate', latest.data.syncDate);
-                    this.updateUI();
                     this.showNotification(`✅ 已匯入同步資料（${dateStr}）`);
                 } catch (e) {
                     if (e.name !== 'AbortError') {
@@ -3347,7 +3328,6 @@
                 }
 
                 // 分類分析（2個以上分類才顯示）
-                const categoryLabels = { career: '💼 事業', recharge: '⚡ 充電', life: '🏠 生活', review: '🔍 復盤' };
                 const byCategory = {};
                 stats.tasks.forEach(t => {
                     if (!byCategory[t.category]) byCategory[t.category] = { planned: 0, actual: 0, timeBalance: 0, count: 0 };
@@ -3367,7 +3347,7 @@
                         const catTb = d.timeBalance;
                         const diffColor = catTb >= 0 ? '#51cf66' : '#ff6b6b';
                         catHtml += `<div style="background:var(--bg-tertiary);padding:10px;border-radius:6px;text-align:center;">
-                            <div style="font-weight:600;margin-bottom:4px;">${categoryLabels[cat] || cat}</div>
+                            <div style="font-weight:600;margin-bottom:4px;">${CATEGORY_META[cat] ? `${CATEGORY_META[cat].emoji} ${CATEGORY_META[cat].label}` : cat}</div>
                             <div style="font-size:0.8rem;color:var(--text-secondary);">${d.count} 個任務</div>
                             <div style="font-size:0.8rem;">${d.planned}分 → ${d.actual}分</div>
                             <div style="font-size:0.8rem;color:${diffColor};">${catTb >= 0 ? '+' : ''}${catTb}分（時間收支）</div>
@@ -3471,8 +3451,7 @@
                     title: `${originalTask.title} (副本)`,
                     completed: false,
                     completedAt: null,
-                    order: this.tasks.length,
-                    pinned: null
+                    order: this.tasks.length
                 };
 
                 this.tasks.push(newTask);
