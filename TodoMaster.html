@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.3.2 - 任務管理工具</title>
+    <title>TodoMaster v5.4 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -828,7 +828,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.3.2';
+        const APP_VERSION = 'v5.4';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -2799,9 +2799,18 @@
                 this.updateUI();
             }
 
+            // 超前任務定義：預定日期(date)晚於實際完成日期(completedDate)時，一律視為「賺得」
+            // 忽略 taskType，覆蓋既有的 accumulative/goal/ahead 判斷
+            isAheadCompletion(task) {
+                if (!task.date) return false;
+                const completedDate = task.completedDate || localDateStr();
+                return task.date > completedDate;
+            }
+
             calcTimeBalance(task, actualTime) {
                 if (task.estimatedTime === 'non-continuous') return null;
                 const planned = getTaskPlannedMinutes(task);
+                if (this.isAheadCompletion(task)) return actualTime;
                 const type = task.taskType || 'goal';
                 if (type === 'accumulative') return actualTime - planned;
                 if (type === 'goal')         return planned - actualTime;
