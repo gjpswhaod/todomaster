@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.4 - 任務管理工具</title>
+    <title>TodoMaster v5.4.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -828,7 +828,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.4';
+        const APP_VERSION = 'v5.4.1';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -3375,9 +3375,11 @@
                     stats.tasks.forEach(t => {
                         const day = t.completedDate || (t.completedAt ? t.completedAt.split('T')[0] : null);
                         if (!day) return;
-                        if (!dayStats[day]) dayStats[day] = { actual: 0, planned: 0 };
-                        dayStats[day].actual  += (t.actualTime  || 0);
-                        dayStats[day].planned += (t.plannedTime || 0);
+                        if (!dayStats[day]) dayStats[day] = { actual: 0, planned: 0, balance: 0, hasAhead: false };
+                        dayStats[day].actual   += (t.actualTime  || 0);
+                        dayStats[day].planned  += (t.plannedTime || 0);
+                        dayStats[day].balance  += (t.timeBalance ?? 0);
+                        dayStats[day].hasAhead  = dayStats[day].hasAhead || this.isAheadCompletion(t);
                     });
 
                     const days = period === 'week' ? 7 : 30;
@@ -3393,12 +3395,18 @@
                         const ds = dayStats[key];
                         const planned = ds ? ds.planned : 0;
                         const actual = ds ? ds.actual : 0;
-                        const symbol = (ds && ds.planned > 0) ? getTimingSymbol(ds.actual - ds.planned) : '';
+                        const balance = ds ? ds.balance : 0;
+                        const hasAhead = ds ? ds.hasAhead : false;
+                        // 符號改依當日淨時間收支（balance）判定，而非原始 actual-planned 差值：
+                        // 累積型/超前完成任務本就允許「實際 > 預定」仍屬賺得，用差值會誤判為超時
+                        const symbol = (ds && ds.planned > 0) ? getTimingSymbol(-balance) : '';
                         dayLabels.push({
                             date: `${d.getMonth() + 1}/${d.getDate()}`,
                             symbol,
                             planned,
                             actual,
+                            balance,
+                            hasAhead,
                         });
                         dailyPlanned.push(planned);
                         dailyActual.push(actual);
@@ -3416,16 +3424,30 @@
                     const plannedColor = '#51cf66';
                     const actualColor = '#ff6b6b';
 
-                    const toCircles = (arr, color, label) => arr.map((v, i) => `
+                    const toCircles = (arr, colorOrFn, label, titleSuffixFn) => arr.map((v, i) => {
+                        const color = typeof colorOrFn === 'function' ? colorOrFn(i) : colorOrFn;
+                        const suffix = titleSuffixFn ? titleSuffixFn(i) : '';
+                        return `
                         <circle cx="${xAt(i)}" cy="${yAt(v)}" r="3.5" fill="${color}">
-                            <title>${dayLabels[i].date}${label}：${v}分</title>
-                        </circle>`).join('');
+                            <title>${dayLabels[i].date}${label}：${v}分${suffix}</title>
+                        </circle>`;
+                    }).join('');
+
+                    // 「實際」資料點顏色改依當日淨時間收支決定（賺得/持平＝綠、延遲＝紅），
+                    // 而非固定紅色——避免累積型/超前完成任務的高實際值被誤讀為超時延遲
+                    const actualDotColor = i => (dayLabels[i].balance >= 0 ? plannedColor : actualColor);
+                    const actualTitleSuffix = i => dayLabels[i].hasAhead ? '（含超前完成任務，全額列入賺得）' : '';
+
+                    // 含超前完成任務的日期，於資料點上方加註 ✨ 標記
+                    const aheadMarkers = dailyActual.map((v, i) => dayLabels[i].hasAhead
+                        ? `<text x="${xAt(i)}" y="${yAt(v) - 8}" font-size="11" text-anchor="middle">✨</text>`
+                        : '').join('');
 
                     // 30天模式下每點都有標籤會太擠，僅每 4 天顯示一次日期文字（首尾必顯示）
                     const labelStep = period === 'month' ? 4 : 1;
                     const xLabels = dayLabels.map((dl, i) => {
                         if (i % labelStep !== 0 && i !== days - 1) return '';
-                        const text = dl.symbol ? `${dl.date} ${dl.symbol}` : dl.date;
+                        const text = dl.symbol ? `${dl.date} ${dl.symbol}${dl.hasAhead ? '✨' : ''}` : dl.date;
                         return `<text x="${xAt(i)}" y="${chartH - 8}" font-size="${period === 'month' ? 10 : 12}" fill="var(--text-secondary)" text-anchor="middle">${text}</text>`;
                     }).join('');
 
@@ -3435,14 +3457,15 @@
                             <polyline points="${toPoints(dailyPlanned)}" fill="none" stroke="${plannedColor}" stroke-width="2"></polyline>
                             <polyline points="${toPoints(dailyActual)}" fill="none" stroke="${actualColor}" stroke-width="2"></polyline>
                             ${toCircles(dailyPlanned, plannedColor, '預定')}
-                            ${toCircles(dailyActual, actualColor, '實際')}
+                            ${toCircles(dailyActual, actualDotColor, '實際', actualTitleSuffix)}
+                            ${aheadMarkers}
                             ${xLabels}
                         </svg>`;
 
                     trendHtml += `<div style="margin-top:6px; font-size:0.72rem; color:var(--text-secondary);">
                         <span style="color:${plannedColor};">●</span> 預定時間&nbsp;&nbsp;
-                        <span style="color:${actualColor};">●</span> 實際時間&nbsp;&nbsp;
-                        ⏩ 提前完成&nbsp;&nbsp;✅ 準時&nbsp;&nbsp;⚠️ 超時
+                        <span style="color:${actualColor};">●</span> 實際時間（依當日淨收支變色）&nbsp;&nbsp;
+                        ⏩ 提前完成&nbsp;&nbsp;✅ 準時&nbsp;&nbsp;⚠️ 超時&nbsp;&nbsp;✨ 超前完成（全額賺得）
                     </div>`;
                     trendEl.innerHTML = trendHtml;
                 } else {
