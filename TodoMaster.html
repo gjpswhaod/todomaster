@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.4.1 - 任務管理工具</title>
+    <title>TodoMaster v5.5 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -828,7 +828,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.4.1';
+        const APP_VERSION = 'v5.5';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1433,6 +1433,7 @@
             constructor() {
                 this.tasks = [];
                 this.tags = [];
+                this.overdueLossLog = []; // 逾期任務「重新安排到今天」時記錄的原定日期損失：{ date, minutes, taskId, taskTitle }
                 this.currentFilter = 'all';
                 this.sortMode = 'drag'; // 'drag' 或 'fixed'
                 this.showCompleted = true;
@@ -1463,9 +1464,11 @@
                     const tasksJson = localStorage.getItem('todoTasks');
                     const tagsJson = localStorage.getItem('todoTags');
                     const sortModeJson = localStorage.getItem('todoSortMode');
+                    const overdueLossLogJson = localStorage.getItem('todoOverdueLossLog');
 
                     this.tasks = tasksJson ? JSON.parse(tasksJson) : [];
                     this.tags = tagsJson ? JSON.parse(tagsJson) : [];
+                    this.overdueLossLog = overdueLossLogJson ? JSON.parse(overdueLossLogJson) : [];
                     this.sortMode = sortModeJson ? JSON.parse(sortModeJson) : 'drag';
                     const showCompletedJson = localStorage.getItem('todoShowCompleted');
                     this.showCompleted = showCompletedJson !== null ? JSON.parse(showCompletedJson) : true;
@@ -1479,6 +1482,7 @@
                 try {
                     localStorage.setItem('todoTasks', JSON.stringify(this.tasks));
                     localStorage.setItem('todoTags', JSON.stringify(this.tags));
+                    localStorage.setItem('todoOverdueLossLog', JSON.stringify(this.overdueLossLog));
                     localStorage.setItem('todoSortMode', JSON.stringify(this.sortMode));
                     localStorage.setItem('todoShowCompleted', JSON.stringify(this.showCompleted));
                     // 注意：todoSyncDate 僅在匯入/匯出同步時更新，不在一般存檔時覆蓋
@@ -1714,6 +1718,7 @@
                             const overdueTasks = this.tasks.filter(t => isTaskOverdue(t, todayMidnight));
                             const affectedGroupIds = new Set();
                             overdueTasks.forEach(t => {
+                                this.recordOverdueLoss(t);
                                 this.updateTask(t.id, { date: todayStr });
                                 if (t.groupId && t.groupDelayMode === 'auto') {
                                     affectedGroupIds.add(t.groupId);
@@ -1929,6 +1934,7 @@
                         rescheduleBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
                             const todayStr = localDateStr();
+                            this.recordOverdueLoss(task);
                             this.updateTask(task.id, { date: todayStr });
                             if (task.groupId && task.groupDelayMode === 'auto') {
                                 this.updateGroupTaskDates(task.groupId);
@@ -2818,6 +2824,14 @@
                 return null;
             }
 
+            // 逾期任務「重新安排到今天」時，記為原定日期（task.date 覆寫前）的時間損失。
+            // 僅供「重新安排到今天」按鈕呼叫；拖曳或直接改日期不會呼叫這個方法，不計入原定那天的時間收支。
+            recordOverdueLoss(task) {
+                const planned = getTaskPlannedMinutes(task);
+                if (!task.date || planned <= 0) return;
+                this.overdueLossLog.push({ date: task.date, minutes: planned, taskId: task.id, taskTitle: task.title });
+            }
+
             compressCompletedTasks() {
                 let count = 0;
                 this.tasks = this.tasks.map(task => {
@@ -2862,6 +2876,9 @@
                     return !ref || ref >= cutoffStr;
                 });
                 const removed = beforeLen - this.tasks.length;
+
+                // 同步清除30天前的逾期損失記錄，避免無限累積
+                this.overdueLossLog = this.overdueLossLog.filter(rec => rec.date >= cutoffStr);
 
                 this.saveToStorage();
                 this.updateUI();
@@ -2956,7 +2973,8 @@
                     version: APP_VERSION,
                     syncDate: new Date().toISOString(),
                     tasks: this.tasks,
-                    tags: this.tags
+                    tags: this.tags,
+                    overdueLossLog: this.overdueLossLog
                 };
             }
 
@@ -3074,6 +3092,7 @@
             _applyBackupData(latest) {
                 this.tasks = latest.data.tasks;
                 this.tags = latest.data.tags || [];
+                this.overdueLossLog = latest.data.overdueLossLog || [];
                 this.saveToStorage();
                 this.updateUI();
             }
@@ -3272,6 +3291,11 @@
                     if (tb !== null) totalTimeBalance += tb;
                 });
 
+                // 逾期任務「重新安排到今天」的損失，記入原定日期落在統計區間內者
+                this.overdueLossLog.forEach(rec => {
+                    if (rec.date >= startDateStr) totalTimeBalance -= rec.minutes;
+                });
+
                 // 更新摘要
                 document.getElementById('totalPlanned').textContent = stats.plannedTime + '分';
                 document.getElementById('totalActual').textContent = stats.actualTime + '分';
@@ -3280,7 +3304,9 @@
                 // 渲染表格
                 const statsTable = document.getElementById('statsTable');
                 const ncEl = document.getElementById('nonContinuousCount');
-                if (stats.tasks.length === 0 && nonContinuousTasks.length === 0) {
+                // 若區間內有逾期重新安排的損失記錄，即使沒有已完成任務，仍須往下渲染每日趨勢圖
+                const hasOverdueLossInRange = this.overdueLossLog.some(rec => rec.date >= startDateStr);
+                if (stats.tasks.length === 0 && nonContinuousTasks.length === 0 && !hasOverdueLossInRange) {
                     statsTable.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">暫無完成任務</div>';
                     ncEl.textContent = '';
                     document.getElementById('categoryBreakdown').innerHTML = '';
@@ -3380,6 +3406,14 @@
                         dayStats[day].planned  += (t.plannedTime || 0);
                         dayStats[day].balance  += (t.timeBalance ?? 0);
                         dayStats[day].hasAhead  = dayStats[day].hasAhead || this.isAheadCompletion(t);
+                    });
+
+                    // 逾期任務「重新安排到今天」的損失，記到原定日期那一天（視為當天的負值時間收支）
+                    this.overdueLossLog.forEach(rec => {
+                        if (rec.date < startDateStr) return;
+                        if (!dayStats[rec.date]) dayStats[rec.date] = { actual: 0, planned: 0, balance: 0, hasAhead: false };
+                        dayStats[rec.date].planned += rec.minutes;
+                        dayStats[rec.date].balance -= rec.minutes;
                     });
 
                     const days = period === 'week' ? 7 : 30;
