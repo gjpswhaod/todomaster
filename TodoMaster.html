@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.5 - 任務管理工具</title>
+    <title>TodoMaster v5.6 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -828,7 +828,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.5';
+        const APP_VERSION = 'v5.6';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1351,7 +1351,7 @@
                 </button>
             </div>
 
-            <div id="statsContent" style="overflow-y: auto; max-height: 500px;">
+            <div style="overflow-y: auto; max-height: 500px;">
                 <div id="statsTable"></div>
                 <div id="nonContinuousCount" style="margin-top: 8px; font-size: 0.85rem; color: var(--text-secondary);"></div>
                 <div id="categoryBreakdown" style="margin-top: 16px;"></div>
@@ -1521,6 +1521,19 @@
             deleteTask(id) {
                 this.tasks = this.tasks.filter(t => t.id !== id);
                 this.saveToStorage();
+            }
+
+            buildCompletionUpdates(task) {
+                const updates = { completed: true };
+                if (task.blocks && task.completedBlocks < task.blocks) {
+                    updates.completedBlocks = task.blocks;
+                }
+                return updates;
+            }
+
+            nextGroupOrder(groupId, excludeTaskId = null) {
+                const groupTasks = this.tasks.filter(t => t.groupId === groupId && t.id !== excludeTaskId && !t.completed);
+                return groupTasks.length + 1;
             }
 
             getTaskById(id) {
@@ -1842,12 +1855,7 @@
                         if (checkbox.checked && !task.completed && !task.actualTime) {
                             // 完成任務但未設置實際時間，詢問用戶
                             // 如果有 blocks，先完成所有剩餘的 blocks
-                            let updates = { completed: true };
-                            if (task.blocks && task.completedBlocks < task.blocks) {
-                                updates.completedBlocks = task.blocks;
-                            }
-
-                            this.updateTask(task.id, updates);
+                            this.updateTask(task.id, this.buildCompletionUpdates(task));
                             this.updateUI();  // ✅ 重新渲染任務列表，使任務立即變為半透明
 
                             if (task.estimatedTime === 'non-continuous') {
@@ -1858,11 +1866,7 @@
                             this.openCompleteTimeModal(task.id, checkbox);
                         } else if (checkbox.checked) {
                             // 已設置時間或已完成過，直接更新
-                            let updates = { completed: true };
-                            if (task.blocks && task.completedBlocks < task.blocks) {
-                                updates.completedBlocks = task.blocks;
-                            }
-                            this.updateTask(task.id, updates);
+                            this.updateTask(task.id, this.buildCompletionUpdates(task));
                             // 迴圈任務：若尚未建立下一次副本，補充建立
                             if (task.recurring && task.recurring.enabled && !task.recurringCreated) {
                                 this.createNextRecurringTask(task);
@@ -2723,10 +2727,11 @@
             createNextRecurringTask(completedTask) {
                 const interval = completedTask.recurring.interval;
                 let nextDate = '';
+                let activeTasks = null;
 
                 if (completedTask.groupId) {
                     // 群組任務：下一次日期 = 群組最後一個未完成任務的日期 + interval
-                    const activeTasks = this.tasks
+                    activeTasks = this.tasks
                         .filter(t => t.groupId === completedTask.groupId && !t.completed && t.id !== completedTask.id)
                         .sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
 
@@ -2753,12 +2758,11 @@
                 }
 
                 // 計算新的 groupOrder（放在群組末尾）
+                // 先重新編號現有活躍任務為連續的 1..N，避免順序數字隨完成次數無限增加
                 let newGroupOrder = null;
                 if (completedTask.groupId) {
-                    const allGroupTasks = this.tasks.filter(t => t.groupId === completedTask.groupId);
-                    newGroupOrder = allGroupTasks.length > 0
-                        ? Math.max(...allGroupTasks.map(t => t.groupOrder ?? 0)) + 1
-                        : 1;
+                    activeTasks.forEach((t, i) => { t.groupOrder = i + 1; });
+                    newGroupOrder = activeTasks.length + 1;
                 }
 
                 const newTask = {
@@ -3250,9 +3254,7 @@
                     startDate.setHours(0, 0, 0, 0);
                 } else if (period === 'week') {
                     startDate = new Date(now);
-                    const day = now.getDay();
-                    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-                    startDate.setDate(diff);
+                    startDate.setDate(startDate.getDate() - 6);
                     startDate.setHours(0, 0, 0, 0);
                 } else if (period === 'month') {
                     startDate = new Date(now);
@@ -3604,12 +3606,11 @@
                     if (this.currentEditingTask && this.currentEditingTask.groupId === groupId) {
                         taskData.groupOrder = this.currentEditingTask.groupOrder;
                     } else {
-                        const groupTasks = this.tasks.filter(t => t.groupId === groupId && t.id !== this.currentEditingTask?.id);
-                        const maxOrder = groupTasks.length > 0 ? Math.max(...groupTasks.map(t => t.groupOrder || 1)) : 0;
-                        taskData.groupOrder = maxOrder + 1;
+                        taskData.groupOrder = this.nextGroupOrder(groupId, this.currentEditingTask?.id);
                     }
                 }
 
+                let savedTaskId = null;
                 if (this.currentEditingTask) {
                     // 編輯時保留已完成的 blocks 和已花費時間
                     if (!blocks) {
@@ -3638,10 +3639,11 @@
                         taskData.nextStepNotes = this.currentEditingTask.nextStepNotes || null;
                     }
 
+                    savedTaskId = this.currentEditingTask.id;
                     this.updateTask(this.currentEditingTask.id, taskData);
                     this.showNotification('✅ 任務已更新');
                 } else {
-                    this.addTask(taskData);
+                    savedTaskId = this.addTask(taskData).id;
                     this.showNotification('✅ 任務已添加');
                 }
 
@@ -3658,9 +3660,9 @@
                     });
                 }
 
-                // 如果是群組任務，自動計算日期
+                // 如果是群組任務，自動計算日期（以剛儲存的任務日期為錨點，避免被其他任務的舊日期覆蓋）
                 if (taskData.groupId && taskData.recurring && taskData.recurring.enabled) {
-                    this.updateGroupTaskDates(taskData.groupId);
+                    this.updateGroupTaskDates(taskData.groupId, savedTaskId);
                 }
 
                 this.updateUI();
@@ -3685,7 +3687,7 @@
                 return Object.values(groups);
             }
 
-            updateGroupTaskDates(groupId) {
+            updateGroupTaskDates(groupId, anchorTaskId = null) {
                 // 只重算未完成的任務，已完成任務保留原日期作為歷史記錄
                 const activeTasks = this.tasks
                     .filter(t => t.groupId === groupId && !t.completed && t.recurring && t.recurring.enabled)
@@ -3693,31 +3695,57 @@
 
                 if (activeTasks.length === 0) return;
 
-                // 基準日期取所有活躍任務中最早的有效日期（不受當前排列順序影響）
-                // 這確保每次拖曳重排只是重新分配固定時間槽，不會讓日期不斷往後推移
-                const validDates = activeTasks
-                    .map(t => t.date)
-                    .filter(d => d && d !== '9999-12-31')
-                    .sort();
-
-                if (validDates.length === 0) return;
-
-                const baseDate = new Date(validDates[0]);
                 const cycleMode = activeTasks[0].groupCycleMode || 'uniform';
 
+                // 基準錨點：優先使用指定任務目前的日期（例如使用者剛編輯並延後的那筆任務），
+                // 讓其餘任務以此為準重新排程；若未指定錨點，則沿用「取所有活躍任務中最早的
+                // 有效日期」的舊行為，確保拖曳重排等既有情境不受影響（不受當前排列順序影響，
+                // 避免每次重排讓日期不斷往後推移）
+                let anchorIndex = 0;
+                let anchorDateStr = null;
+
+                if (anchorTaskId) {
+                    const idx = activeTasks.findIndex(t => t.id === anchorTaskId);
+                    if (idx !== -1 && activeTasks[idx].date && activeTasks[idx].date !== '9999-12-31') {
+                        anchorIndex = idx;
+                        anchorDateStr = activeTasks[idx].date;
+                    }
+                }
+
+                if (!anchorDateStr) {
+                    const validDates = activeTasks
+                        .map(t => t.date)
+                        .filter(d => d && d !== '9999-12-31')
+                        .sort();
+
+                    if (validDates.length === 0) return;
+
+                    anchorDateStr = validDates[0];
+                    anchorIndex = 0;
+                }
+
+                const anchorDate = new Date(anchorDateStr);
+
                 if (cycleMode === 'individual') {
-                    // 個別設定：每個任務的間隔天數表示到下一個任務的天數，依序累加排程
-                    let cursor = new Date(baseDate);
-                    activeTasks.forEach(task => {
-                        task.date = localDateStr(cursor);
-                        cursor.setDate(cursor.getDate() + (task.recurring.interval || 1));
+                    // 個別設定：先算出每個任務相對錨點的累積天數位移，再以錨點日期對齊套用
+                    const offsets = new Array(activeTasks.length).fill(0);
+                    for (let i = anchorIndex + 1; i < activeTasks.length; i++) {
+                        offsets[i] = offsets[i - 1] + (activeTasks[i - 1].recurring.interval || 1);
+                    }
+                    for (let i = anchorIndex - 1; i >= 0; i--) {
+                        offsets[i] = offsets[i + 1] - (activeTasks[i].recurring.interval || 1);
+                    }
+                    activeTasks.forEach((task, i) => {
+                        const newDate = new Date(anchorDate);
+                        newDate.setDate(newDate.getDate() + offsets[i]);
+                        task.date = localDateStr(newDate);
                     });
                 } else {
                     // 統一：所有任務共用同一間隔天數
                     const interval = activeTasks[0].recurring.interval;
                     activeTasks.forEach((task, index) => {
-                        const newDate = new Date(baseDate);
-                        newDate.setDate(newDate.getDate() + index * interval);
+                        const newDate = new Date(anchorDate);
+                        newDate.setDate(newDate.getDate() + (index - anchorIndex) * interval);
                         task.date = localDateStr(newDate);
                     });
                 }
