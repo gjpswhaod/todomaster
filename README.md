@@ -5,7 +5,7 @@
 此資料夾用於 **Claude Code 維護和開發 TodoMaster 應用**。
 
 **主應用**：`TodoMaster.html`  
-**版本**：5.6 (2026-07-30)  
+**版本**：5.6.2 (2026-08-26)  
 **狀態**：✅ 穩定版本  
 **責任方**：Claude Code
 
@@ -83,6 +83,20 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 ---
 
 ## 版本歷史
+
+### v5.6.2 (2026-08-26) - 程式碼清理
+- 🔍 全檔審查（方法呼叫點、重複定義、CSS/id 重複）：未發現未使用的方法或重複定義的函式/id，判定程式碼庫整體乾淨
+- 🐛 修正 `#blockSelect` 輸入框使用未定義的 CSS 變數 `var(--border)`／`var(--text)`（`:root` 從未宣告過這兩個變數），導致樣式退回瀏覽器預設、與其他表單輸入框不一致；改為與其他輸入框一致的 `var(--bg-tertiary)`／`var(--text-primary)`
+- 🛠️ 新增 `setStatsPeriod(period, statsPeriodBtns)`，合併統計彈窗中「今日／本週／本月」三顆分頁按鈕原本各自重複三次的 active class 切換邏輯
+- 🛠️ 新增 `selectFilterButton(btn, filterValue)`，合併一般分類過濾器與群組過濾器按鈕中重複的「切換 active、設定 currentFilter、重新渲染」邏輯
+- 🛠️ 新增 `rescheduleTaskToToday(task, todayStr, affectedGroupIds)`，合併單一任務「重新安排到今天」按鈕與「全部重新安排」按鈕中重複的「記錄逾期損失、更新日期、群組連動重算」三步驟邏輯
+- ✅ 純程式碼整理，不變更任何現有功能行為
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v5.6.2`
+
+### v5.6.1 (2026-08-26) - 完成時間詢問取消 debug
+- 🐛 修正詢問完成時間時按「取消」無法把任務恢復為未完成狀態：checkbox 變更事件在彈出「完成時間詢問模態框」前就已呼叫 `updateTask(task.id, { completed: true, ... })` 把任務標記為完成，但 `cancelCompleteTime()` 只關閉了模態框並重新渲染，從未把 `completed` 改回 `false`，導致取消後任務仍停留在已完成狀態
+- 🛠️ `openCompleteTimeModal()` 新增第三參數 `originalState`，記錄彈窗前的 `completed`／`completedBlocks`／`completedAt`／`completedDate` 原始值並存到 `this.pendingCompleteTask`；`cancelCompleteTime()` 取消時以此還原任務狀態；點擊模態框背景（等同取消）也改為呼叫 `cancelCompleteTime()`，與「取消」按鈕行為一致；實際確認完成（使用預計時間／確認送出）時清除 `pendingCompleteTask`，避免誤還原
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v5.6.1`
 
 ### v5.6 (2026-07-30) - 群組任務修正
 - 🐛 修正群組任務「順序」數字隨每次循環完成不斷累加：`nextGroupOrder()` 原本用 `Math.max(groupOrder)+1`，且未排除已完成的歷史任務，導致順序只增不減；改為排除已完成任務、以目前活躍任務數重新計算，並在自動建立下一次循環任務時先將現有活躍任務重新編號為連續的 1..N
@@ -441,7 +455,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ```
 TodoMaster/
-├── TodoMaster.html                        ← 【主文件】當前應用版本 (v5.5.2)
+├── TodoMaster.html                        ← 【主文件】當前應用版本 (v5.6.2)
 ├── README.md                              ← 【指南】本維護文檔
 └── backups/
     ├── TodoMaster_v{版本}_{日期}.html     ← 【備份】完整版本備份

@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.6 - 任務管理工具</title>
+    <title>TodoMaster v5.6.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -828,7 +828,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.6';
+        const APP_VERSION = 'v5.6.2';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1094,7 +1094,7 @@
                         <label>Block 數量（每 block = 30 分鐘）</label>
                         <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
                             <input type="number" id="blockSelect" min="2" max="99" value="2"
-                                   style="width: 80px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; background: var(--bg-secondary); color: var(--text);">
+                                   style="width: 80px; padding: 6px 8px; border: 1px solid var(--bg-tertiary); border-radius: 6px; font-size: 14px; background: var(--bg-secondary); color: var(--text-primary);">
                             <span id="blockTimeCalc" style="color: var(--text-secondary); font-size: 13px;">= 60 分鐘（1 小時）</span>
                         </div>
                     </div>
@@ -1730,13 +1730,7 @@
                         rescheduleAllBtn.addEventListener('click', () => {
                             const overdueTasks = this.tasks.filter(t => isTaskOverdue(t, todayMidnight));
                             const affectedGroupIds = new Set();
-                            overdueTasks.forEach(t => {
-                                this.recordOverdueLoss(t);
-                                this.updateTask(t.id, { date: todayStr });
-                                if (t.groupId && t.groupDelayMode === 'auto') {
-                                    affectedGroupIds.add(t.groupId);
-                                }
-                            });
+                            overdueTasks.forEach(t => this.rescheduleTaskToToday(t, todayStr, affectedGroupIds));
                             affectedGroupIds.forEach(groupId => this.updateGroupTaskDates(groupId));
                             if (overdueTasks.length > 0) {
                                 this.showNotification(`📅 已將 ${overdueTasks.length} 個逾期任務重新安排到今天`);
@@ -1854,6 +1848,13 @@
 
                         if (checkbox.checked && !task.completed && !task.actualTime) {
                             // 完成任務但未設置實際時間，詢問用戶
+                            // 保存原始狀態，供使用者取消時恢復
+                            const originalState = {
+                                completed: task.completed,
+                                completedBlocks: task.completedBlocks,
+                                completedAt: task.completedAt,
+                                completedDate: task.completedDate
+                            };
                             // 如果有 blocks，先完成所有剩餘的 blocks
                             this.updateTask(task.id, this.buildCompletionUpdates(task));
                             this.updateUI();  // ✅ 重新渲染任務列表，使任務立即變為半透明
@@ -1863,7 +1864,7 @@
                                 return;
                             }
 
-                            this.openCompleteTimeModal(task.id, checkbox);
+                            this.openCompleteTimeModal(task.id, checkbox, originalState);
                         } else if (checkbox.checked) {
                             // 已設置時間或已完成過，直接更新
                             this.updateTask(task.id, this.buildCompletionUpdates(task));
@@ -1937,12 +1938,7 @@
                     if (rescheduleBtn) {
                         rescheduleBtn.addEventListener('click', (e) => {
                             e.stopPropagation();
-                            const todayStr = localDateStr();
-                            this.recordOverdueLoss(task);
-                            this.updateTask(task.id, { date: todayStr });
-                            if (task.groupId && task.groupDelayMode === 'auto') {
-                                this.updateGroupTaskDates(task.groupId);
-                            }
+                            this.rescheduleTaskToToday(task, localDateStr());
                             this.showNotification('📅 已重新安排到今天');
                             this.updateUI();
                         });
@@ -2311,11 +2307,7 @@
                             return;
                         }
 
-                        const filter = btn.dataset.filter;
-                        document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
-                        this.currentFilter = filter;
-                        this.renderTasks();
+                        this.selectFilterButton(btn, btn.dataset.filter);
 
                         // 手機版：選擇視圖/分類後自動收合側欄，避免遮住任務列表
                         if (window.innerWidth <= 768) {
@@ -2598,9 +2590,12 @@
             }
 
 
-            openCompleteTimeModal(taskId, checkbox) {
+            openCompleteTimeModal(taskId, checkbox, originalState) {
                 const task = this.getTaskById(taskId);
                 if (!task) return;
+
+                // 保存待處理狀態，供取消時恢復任務未完成前的狀態
+                this.pendingCompleteTask = { taskId, originalState };
 
                 // 設置預計時間提示
                 const estimateTimeHint = document.getElementById('estimateTimeHint');
@@ -2616,6 +2611,7 @@
 
                 // 設置按鈕事件
                 document.getElementById('useEstimateBtn').onclick = () => {
+                    this.pendingCompleteTask = null;
                     this.completeTaskWithTime(taskId, estimateTime);
                     closeModal('completeTimeModal');
                 };
@@ -2624,6 +2620,7 @@
                     const actualTime = document.getElementById('completeTimeInput').value.trim();
                     if (!actualTime) {
                         // 未填寫時使用預計時間
+                        this.pendingCompleteTask = null;
                         this.completeTaskWithTime(taskId, estimateTime);
                     } else {
                         const time = parseInt(actualTime);
@@ -2631,6 +2628,7 @@
                             alert('請輸入有效的時間（正整數）');
                             return;
                         }
+                        this.pendingCompleteTask = null;
                         this.completeTaskWithTime(taskId, time);
                     }
                     closeModal('completeTimeModal');
@@ -2639,11 +2637,11 @@
                 // 回車鍵確認
                 bindEnterToClick('completeTimeInput', 'confirmCompleteBtn');
 
-                // 保存原始複選框狀態，以便用戶點擊外部取消時恢復（實際關閉交由通用 backdrop-click handler 處理）
+                // 點擊背景視為取消，與「取消」按鈕行為一致（恢復任務未完成狀態）
                 const originalModal = document.getElementById('completeTimeModal');
                 originalModal.onclick = (e) => {
-                    if (e.target === originalModal && checkbox) {
-                        checkbox.checked = false;
+                    if (e.target === originalModal) {
+                        this.cancelCompleteTime();
                     }
                 };
 
@@ -2804,6 +2802,14 @@
             }
 
             cancelCompleteTime() {
+                // 恢復任務在彈出詢問視窗前的完成狀態（否則取消後任務仍會停留在「已完成」）
+                if (this.pendingCompleteTask) {
+                    const { taskId, originalState } = this.pendingCompleteTask;
+                    if (originalState) {
+                        this.updateTask(taskId, originalState);
+                    }
+                    this.pendingCompleteTask = null;
+                }
                 closeModal('completeTimeModal');
                 // 重新渲染以恢復複選框狀態
                 this.updateUI();
@@ -2834,6 +2840,20 @@
                 const planned = getTaskPlannedMinutes(task);
                 if (!task.date || planned <= 0) return;
                 this.overdueLossLog.push({ date: task.date, minutes: planned, taskId: task.id, taskTitle: task.title });
+            }
+
+            // affectedGroupIds 由呼叫端傳入時（批次重新安排），群組日期重算會被收集起來統一處理；
+            // 未傳入時（單一任務按鈕）則立即重算該任務所屬群組
+            rescheduleTaskToToday(task, todayStr, affectedGroupIds) {
+                this.recordOverdueLoss(task);
+                this.updateTask(task.id, { date: todayStr });
+                if (task.groupId && task.groupDelayMode === 'auto') {
+                    if (affectedGroupIds) {
+                        affectedGroupIds.add(task.groupId);
+                    } else {
+                        this.updateGroupTaskDates(task.groupId);
+                    }
+                }
             }
 
             compressCompletedTasks() {
@@ -2900,29 +2920,30 @@
                 const todayBtn = document.getElementById('todayStatsBtn');
                 const weekBtn = document.getElementById('weekStatsBtn');
                 const monthBtn = document.getElementById('monthStatsBtn');
-
-                todayBtn.onclick = () => {
-                    todayBtn.classList.add('active');
-                    weekBtn.classList.remove('active');
-                    monthBtn.classList.remove('active');
-                    this.renderStats('today');
-                };
-
-                weekBtn.onclick = () => {
-                    weekBtn.classList.add('active');
-                    todayBtn.classList.remove('active');
-                    monthBtn.classList.remove('active');
-                    this.renderStats('week');
-                };
-
-                monthBtn.onclick = () => {
-                    monthBtn.classList.add('active');
-                    todayBtn.classList.remove('active');
-                    weekBtn.classList.remove('active');
-                    this.renderStats('month');
-                };
+                const statsPeriodBtns = [
+                    { btn: todayBtn, period: 'today' },
+                    { btn: weekBtn, period: 'week' },
+                    { btn: monthBtn, period: 'month' }
+                ];
+                statsPeriodBtns.forEach(({ btn, period }) => {
+                    btn.onclick = () => this.setStatsPeriod(period, statsPeriodBtns);
+                });
 
                 this.renderStats('today');
+            }
+
+            setStatsPeriod(period, statsPeriodBtns) {
+                statsPeriodBtns.forEach(({ btn, period: p }) => {
+                    btn.classList.toggle('active', p === period);
+                });
+                this.renderStats(period);
+            }
+
+            selectFilterButton(btn, filterValue) {
+                document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.currentFilter = filterValue;
+                this.renderTasks();
             }
 
             setupQuickDateButtons() {
@@ -3775,12 +3796,7 @@
                     }
                     btn.innerHTML = `<span class="filter-icon">🔁</span>${this.escapeHtml(group.name)}`;
                     btn.dataset.filter = `group:${group.groupId}`;
-                    btn.onclick = () => {
-                        document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
-                        btn.classList.add('active');
-                        this.currentFilter = `group:${group.groupId}`;
-                        this.renderTasks();
-                    };
+                    btn.onclick = () => this.selectFilterButton(btn, `group:${group.groupId}`);
                     filterList.appendChild(btn);
                 });
             }
