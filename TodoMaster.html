@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v5.6.2 - 任務管理工具</title>
+    <title>TodoMaster v6.0.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -365,6 +365,26 @@
         }
         .reschedule-today-btn:hover { background: rgba(255, 107, 107, 0.3); }
 
+        /* 暫存區卡片快捷排程鈕 */
+        .staging-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+        .staging-actions button {
+            padding: 3px 10px;
+            font-size: 0.78rem;
+            cursor: pointer;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 4px;
+            color: var(--text-secondary);
+        }
+        .staging-actions button:hover {
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+
         .time-section { margin-bottom: 4px; }
         .time-section-header {
             font-size: 0.78rem;
@@ -602,6 +622,7 @@
 
         .form-group input[type="text"],
         .form-group input[type="date"],
+        .form-group input[type="time"],
         .form-group input[type="number"],
         .form-group textarea,
         .form-group select {
@@ -617,6 +638,7 @@
 
         .form-group input[type="text"]:focus,
         .form-group input[type="date"]:focus,
+        .form-group input[type="time"]:focus,
         .form-group input[type="number"]:focus,
         .form-group textarea:focus,
         .form-group select:focus {
@@ -738,10 +760,6 @@
 
         /* 響應式設計 */
         @media (max-width: 768px) {
-            .app-container {
-                grid-template-columns: 1fr;
-            }
-
             .sidebar {
                 display: none;
                 position: fixed;
@@ -828,7 +846,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v5.6.2';
+        const APP_VERSION = 'v6.0.1';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -890,6 +908,23 @@
             document.getElementById(inputId).onkeypress = (e) => {
                 if (e.key === 'Enter') document.getElementById(btnId).click();
             };
+        }
+
+        // 暫存區 = 未排程（無日期、未壓縮）；「不限期」9999-12-31 不算暫存
+        function isStagedTask(task) {
+            return !task.compressed && (!task.date || task.date === '');
+        }
+        // 'HH:MM' → 當日分鐘數；無值回傳 null
+        function timeToMinutes(hhmm) {
+            if (!hhmm) return null;
+            const [h, m] = hhmm.split(':').map(Number);
+            if (Number.isNaN(h) || Number.isNaN(m)) return null;
+            return h * 60 + m;
+        }
+        // 分鐘數 → 'HH:MM'（夾在 00:00 ~ 23:59）
+        function minutesToTime(mins) {
+            const v = Math.max(0, Math.min(23 * 60 + 59, Math.round(mins)));
+            return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
         }
 
 </script>
@@ -1028,7 +1063,7 @@
                         </label>
                         <label class="radio-item">
                             <input type="radio" name="dateMode" value="unscheduled">
-                            <span>未排程</span>
+                            <span>📥 暫存區（未排程，之後再排）</span>
                         </label>
                         <label class="radio-item">
                             <input type="radio" name="dateMode" value="unlimited">
@@ -1048,6 +1083,10 @@
                             <button type="button" class="btn btn-secondary btn-small" id="nextFriBtn">下週五</button>
                             <button type="button" class="btn btn-secondary btn-small" id="nextSatBtn">下週六</button>
                             <button type="button" class="btn btn-secondary btn-small" id="nextSunBtn">下週日</button>
+                        </div>
+                        <div style="margin-top: 10px;">
+                            <label style="font-size: 0.9em; color: var(--text-secondary); display: block; margin-bottom: 4px;">當天時刻 HH:MM（選填，一天內依時刻自動排序）</label>
+                            <input type="time" id="taskTime">
                         </div>
                     </div>
                 </div>
@@ -1563,6 +1602,11 @@
                     filtered = filtered.filter(t => t.groupId === groupId);
                 }
 
+                // 暫存任務只在「所有任務」首頁的暫存區出現，不進任何分類/標籤/群組篩選
+                if (this.currentFilter !== 'all') {
+                    filtered = filtered.filter(t => !isStagedTask(t));
+                }
+
                 if (!this.showCompleted) {
                     filtered = filtered.filter(t => !t.completed);
                 }
@@ -1591,6 +1635,11 @@
                             if (d !== 0) return d;
                             const pr = pinRank(a) - pinRank(b);
                             if (pr !== 0) return pr;
+                            // 同一天內：未指定時刻者在前，其餘依 HH:MM 由早到晚
+                            const ta = timeToMinutes(a.time), tb = timeToMinutes(b.time);
+                            if (ta === null && tb !== null) return -1;
+                            if (ta !== null && tb === null) return 1;
+                            if (ta !== null && tb !== null && ta !== tb) return ta - tb;
                         }
                         return (a.order ?? 9999) - (b.order ?? 9999);
                     });
@@ -1668,131 +1717,140 @@
                 taskList.innerHTML = '';
 
                 // 三區塊視圖：僅 'all' filter
-                const isSectionView = this.currentFilter === 'all';
-                let sectionOverdueList = null, sectionTodayList = null, sectionTomorrowList = null, sectionDayAfterList = null, sectionLaterList = null;
                 const todayStr = localDateStr();
-                const todayMidnight = getTodayMidnight();
-                const tomorrowDate = new Date(); tomorrowDate.setDate(tomorrowDate.getDate() + 1);
-                const tomorrowStr = localDateStr(tomorrowDate);
-                const dayAfterDate = new Date(); dayAfterDate.setDate(dayAfterDate.getDate() + 2);
-                const dayAfterStr = localDateStr(dayAfterDate);
-                if (isSectionView) {
-                    taskList.innerHTML = `
-                        <div class="time-section" id="section-overdue" data-section="overdue">
-                            <div class="time-section-header">⚠️ 逾期
-                                <button class="reschedule-all-btn" id="rescheduleAllBtn">📅 全部重新安排到今天</button>
-                            </div>
-                            <ol class="task-list section-task-list" id="taskList-overdue"></ol>
-                        </div>
-                        <div class="time-section" id="section-today" data-section="today">
-                            <div class="time-section-header">📅 今天<span class="section-time-total" id="section-today-total"></span></div>
-                            <ol class="task-list section-task-list" id="taskList-today"></ol>
-                        </div>
-                        <div class="time-section" id="section-tomorrow" data-section="tomorrow">
-                            <div class="time-section-header">🌅 明天<span class="section-time-total" id="section-tomorrow-total"></span></div>
-                            <ol class="task-list section-task-list" id="taskList-tomorrow"></ol>
-                        </div>
-                        <div class="time-section" id="section-dayafter" data-section="dayafter">
-                            <div class="time-section-header">🌤️ 後天<span class="section-time-total" id="section-dayafter-total"></span></div>
-                            <ol class="task-list section-task-list" id="taskList-dayafter"></ol>
-                        </div>
-                        <div class="time-section" id="section-later" data-section="later">
-                            <div class="time-section-header">🗓️ 更久以後</div>
-                            <ol class="task-list section-task-list" id="taskList-later"></ol>
-                        </div>
-                    `;
-                    sectionOverdueList = document.getElementById('taskList-overdue');
-                    sectionTodayList = document.getElementById('taskList-today');
-                    sectionTomorrowList = document.getElementById('taskList-tomorrow');
-                    sectionDayAfterList = document.getElementById('taskList-dayafter');
-                    sectionLaterList = document.getElementById('taskList-later');
+                const ctx = {
+                    isSectionView: this.currentFilter === 'all',
+                    todayStr,
+                    todayMidnight: getTodayMidnight(),
+                    tomorrowStr: addDaysToDate(todayStr, 1),
+                    dayAfterStr: addDaysToDate(todayStr, 2),
+                    isDraggable: this.sortMode === 'drag' || this.currentFilter.startsWith('group:')
+                };
 
-                    // dragover on section containers for cross-section dragging
-                    [
-                        { el: sectionOverdueList, sec: 'overdue' },
-                        { el: sectionTodayList, sec: 'today' },
-                        { el: sectionTomorrowList, sec: 'tomorrow' },
-                        { el: sectionDayAfterList, sec: 'dayafter' },
-                        { el: sectionLaterList, sec: 'later' }
-                    ].forEach(({ el }) => {
-                        el.addEventListener('dragover', (e) => {
-                            e.preventDefault();
-                            const draggingEl = document.querySelector('.task-item.dragging');
-                            if (!draggingEl) return;
-                            const after = this.getDragAfterElement(el, e.clientY);
-                            if (after == null) el.appendChild(draggingEl);
-                            else el.insertBefore(draggingEl, after);
-                        });
-                    });
-
-                    const rescheduleAllBtn = document.getElementById('rescheduleAllBtn');
-                    if (rescheduleAllBtn) {
-                        rescheduleAllBtn.addEventListener('click', () => {
-                            const overdueTasks = this.tasks.filter(t => isTaskOverdue(t, todayMidnight));
-                            const affectedGroupIds = new Set();
-                            overdueTasks.forEach(t => this.rescheduleTaskToToday(t, todayStr, affectedGroupIds));
-                            affectedGroupIds.forEach(groupId => this.updateGroupTaskDates(groupId));
-                            if (overdueTasks.length > 0) {
-                                this.showNotification(`📅 已將 ${overdueTasks.length} 個逾期任務重新安排到今天`);
-                                this.updateUI();
-                            }
-                        });
-                    }
-                }
-
-                let todayMinutes = 0, tomorrowMinutes = 0, dayAfterMinutes = 0;
-                let todayCompletedMinutes = 0, tomorrowCompletedMinutes = 0, dayAfterCompletedMinutes = 0;
-
-                // 已預定/完成時數統計一律以 this.tasks 計算，不受「顯示/隱藏已完成」篩選影響
-                if (isSectionView) {
-                    this.tasks.forEach(task => {
-                        // 已壓縮任務一律視為已完成，且無逾期疑慮；缺少 date 的舊壓縮資料以 completedDate 近似定位
-                        const bucketDate = task.date || (task.compressed ? task.completedDate : null);
-                        if (isTaskOverdue(task, todayMidnight)) return;
-                        if (bucketDate === todayStr) {
-                            todayMinutes += getTaskPlannedMinutes(task);
-                            if (task.completed) todayCompletedMinutes += getTaskPlannedMinutes(task);
-                        } else if (bucketDate === tomorrowStr) {
-                            tomorrowMinutes += getTaskPlannedMinutes(task);
-                            if (task.completed) tomorrowCompletedMinutes += getTaskPlannedMinutes(task);
-                        } else if (bucketDate === dayAfterStr) {
-                            dayAfterMinutes += getTaskPlannedMinutes(task);
-                            if (task.completed) dayAfterCompletedMinutes += getTaskPlannedMinutes(task);
-                        }
-                    });
-                }
+                const sections = ctx.isSectionView ? this._buildSectionScaffold(ctx) : null;
+                const totals = ctx.isSectionView ? this._computeSectionTotals(ctx) : null;
 
                 filtered.forEach(task => {
                     // 壓縮任務：不顯示卡片，只在時間統計呈現
                     if (task.compressed) return;
+                    const li = this._createTaskCard(task, ctx);
+                    this._placeCard(li, task, sections, ctx);
+                });
 
-                    const li = document.createElement('li');
-                    li.className = 'task-item fade-in';
-                    if (task.completed) li.classList.add('completed');
+                if (ctx.isSectionView) this._finalizeSections(totals, sections);
 
-                    // 群組視圖一律可拖曳；其他視圖依 sortMode
-                    const isDraggable = this.sortMode === 'drag' || this.currentFilter.startsWith('group:');
-                    if (isDraggable) {
-                        li.classList.add('sortable');
-                        li.draggable = true;
-                    } else {
-                        li.draggable = false;
-                    }
+                // dragover / drop 監聽器統一由 setupEventListeners 綁定一次，此處不重複綁定
+            }
 
-                    // 根據預計時間添加顏色編碼
-                    li.classList.add(`time-${task.estimatedTime}`);
+            // 建立三區塊視圖骨架，回傳各 section 的 <ol> 元素 map，並綁定「全部重新安排到今天」按鈕
+            _buildSectionScaffold({ todayStr, todayMidnight }) {
+                document.getElementById('taskList').innerHTML = `
+                    <div class="time-section" id="section-staging" data-section="staging">
+                        <div class="time-section-header">📥 暫存區<span class="section-time-total" id="section-staging-count"></span></div>
+                        <ol class="task-list section-task-list" id="taskList-staging"></ol>
+                    </div>
+                    <div class="time-section" id="section-overdue" data-section="overdue">
+                        <div class="time-section-header">⚠️ 逾期
+                            <button class="reschedule-all-btn" id="rescheduleAllBtn">📅 全部重新安排到今天</button>
+                        </div>
+                        <ol class="task-list section-task-list" id="taskList-overdue"></ol>
+                    </div>
+                    <div class="time-section" id="section-today" data-section="today">
+                        <div class="time-section-header">📅 今天<span class="section-time-total" id="section-today-total"></span></div>
+                        <ol class="task-list section-task-list" id="taskList-today"></ol>
+                    </div>
+                    <div class="time-section" id="section-tomorrow" data-section="tomorrow">
+                        <div class="time-section-header">🌅 明天<span class="section-time-total" id="section-tomorrow-total"></span></div>
+                        <ol class="task-list section-task-list" id="taskList-tomorrow"></ol>
+                    </div>
+                    <div class="time-section" id="section-dayafter" data-section="dayafter">
+                        <div class="time-section-header">🌤️ 後天<span class="section-time-total" id="section-dayafter-total"></span></div>
+                        <ol class="task-list section-task-list" id="taskList-dayafter"></ol>
+                    </div>
+                    <div class="time-section" id="section-later" data-section="later">
+                        <div class="time-section-header">🗓️ 更久以後</div>
+                        <ol class="task-list section-task-list" id="taskList-later"></ol>
+                    </div>
+                `;
 
-                    li.dataset.taskId = task.id;
+                const sections = {
+                    staging: document.getElementById('taskList-staging'),
+                    overdue: document.getElementById('taskList-overdue'),
+                    today: document.getElementById('taskList-today'),
+                    tomorrow: document.getElementById('taskList-tomorrow'),
+                    dayafter: document.getElementById('taskList-dayafter'),
+                    later: document.getElementById('taskList-later')
+                };
 
-                    const dueStatus = this.getTaskDueStatus(task);
+                const rescheduleAllBtn = document.getElementById('rescheduleAllBtn');
+                if (rescheduleAllBtn) {
+                    rescheduleAllBtn.addEventListener('click', () => {
+                        const overdueTasks = this.tasks.filter(t => isTaskOverdue(t, todayMidnight));
+                        const affectedGroupIds = new Set();
+                        overdueTasks.forEach(t => this.rescheduleTaskToToday(t, todayStr, affectedGroupIds));
+                        affectedGroupIds.forEach(groupId => this.updateGroupTaskDates(groupId));
+                        if (overdueTasks.length > 0) {
+                            this.showNotification(`📅 已將 ${overdueTasks.length} 個逾期任務重新安排到今天`);
+                            this.updateUI();
+                        }
+                    });
+                }
 
-                    // 計算預計時間顯示
-                    let estimatedDisplay = TIME_META[task.estimatedTime]?.label;
-                    if (task.estimatedTime === '30plus' && task.blocks) {
-                        estimatedDisplay = `${task.blocks} blocks (${task.blocks * BLOCK_MINUTES}分鐘)`;
-                    }
+                return sections;
+            }
 
-                    let html = `
+            // 今天／明天／後天分區的已預定 / 已完成分鐘數（一律以 this.tasks 計算，不受顯示/隱藏已完成影響）
+            _computeSectionTotals({ todayStr, tomorrowStr, dayAfterStr, todayMidnight }) {
+                const totals = {
+                    today: { total: 0, completed: 0 },
+                    tomorrow: { total: 0, completed: 0 },
+                    dayafter: { total: 0, completed: 0 }
+                };
+                this.tasks.forEach(task => {
+                    // 暫存任務不列入任何時數統計
+                    if (isStagedTask(task)) return;
+                    // 已壓縮任務一律視為已完成，且無逾期疑慮；缺少 date 的舊壓縮資料以 completedDate 近似定位
+                    const bucketDate = task.date || (task.compressed ? task.completedDate : null);
+                    if (isTaskOverdue(task, todayMidnight)) return;
+                    const key = bucketDate === todayStr ? 'today'
+                              : bucketDate === tomorrowStr ? 'tomorrow'
+                              : bucketDate === dayAfterStr ? 'dayafter' : null;
+                    if (!key) return;
+                    const minutes = getTaskPlannedMinutes(task);
+                    totals[key].total += minutes;
+                    if (task.completed) totals[key].completed += minutes;
+                });
+                return totals;
+            }
+
+            // 建立單張任務卡 <li>（含 innerHTML 樣板與所有卡片內事件監聽）
+            _createTaskCard(task, ctx) {
+                const li = document.createElement('li');
+                li.className = 'task-item fade-in';
+                if (task.completed) li.classList.add('completed');
+
+                // 群組視圖一律可拖曳；其他視圖依 sortMode
+                if (ctx.isDraggable) {
+                    li.classList.add('sortable');
+                    li.draggable = true;
+                } else {
+                    li.draggable = false;
+                }
+
+                // 根據預計時間添加顏色編碼
+                li.classList.add(`time-${task.estimatedTime}`);
+
+                li.dataset.taskId = task.id;
+
+                const dueStatus = this.getTaskDueStatus(task);
+
+                // 計算預計時間顯示
+                let estimatedDisplay = TIME_META[task.estimatedTime]?.label;
+                if (task.estimatedTime === '30plus' && task.blocks) {
+                    estimatedDisplay = `${task.blocks} blocks (${task.blocks * BLOCK_MINUTES}分鐘)`;
+                }
+
+                li.innerHTML = `
                         <div class="task-header">
                             <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
                             ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
@@ -1812,9 +1870,10 @@
                             ${task.description ? `<div class="task-description">${this.escapeHtml(task.description)}</div>` : ''}
                             <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
+                                ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
                                 <div class="task-meta-item">${TIME_META[task.estimatedTime]?.emoji} ${estimatedDisplay}</div>
                                 ${task.actualTime ? `<div class="task-meta-item">✓ ${task.actualTime}分鐘</div>` : ''}
-                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
+                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : ''}${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
                             </div>
                             ${task.nextStepNotes ? `
                                 <div style="margin-top: 8px; padding: 8px; background-color: var(--bg-tertiary); border-radius: 4px; border-left: 3px solid var(--accent-primary); font-size: 0.85rem; color: var(--text-secondary);">
@@ -1836,160 +1895,167 @@
                             ${dueStatus.label === '逾期' && !task.completed ? `
                                 <button class="reschedule-today-btn">📅 重新安排到今天</button>
                             ` : ''}
+                            ${isStagedTask(task) && !task.completed ? `
+                                <div class="staging-actions">
+                                    <button data-stage-act="today">📅 今天</button>
+                                    <button data-stage-act="tomorrow">📅 明天</button>
+                                </div>
+                            ` : ''}
                         </div>
                     `;
 
-                    li.innerHTML = html;
+                // 添加事件監聽
+                const checkbox = li.querySelector('.task-checkbox');
+                checkbox.addEventListener('change', (e) => {
+                    e.stopPropagation(); // 防止觸發點擊編輯
 
-                    // 添加事件監聽
-                    const checkbox = li.querySelector('.task-checkbox');
-                    checkbox.addEventListener('change', (e) => {
-                        e.stopPropagation(); // 防止觸發點擊編輯
+                    if (checkbox.checked && !task.completed && !task.actualTime) {
+                        // 完成任務但未設置實際時間，詢問用戶
+                        // 保存原始狀態，供使用者取消時恢復
+                        const originalState = {
+                            completed: task.completed,
+                            completedBlocks: task.completedBlocks,
+                            completedAt: task.completedAt,
+                            completedDate: task.completedDate
+                        };
+                        // 如果有 blocks，先完成所有剩餘的 blocks
+                        this.updateTask(task.id, this.buildCompletionUpdates(task));
+                        this.updateUI();  // ✅ 重新渲染任務列表，使任務立即變為半透明
 
-                        if (checkbox.checked && !task.completed && !task.actualTime) {
-                            // 完成任務但未設置實際時間，詢問用戶
-                            // 保存原始狀態，供使用者取消時恢復
-                            const originalState = {
-                                completed: task.completed,
-                                completedBlocks: task.completedBlocks,
-                                completedAt: task.completedAt,
-                                completedDate: task.completedDate
-                            };
-                            // 如果有 blocks，先完成所有剩餘的 blocks
-                            this.updateTask(task.id, this.buildCompletionUpdates(task));
-                            this.updateUI();  // ✅ 重新渲染任務列表，使任務立即變為半透明
-
-                            if (task.estimatedTime === 'non-continuous') {
-                                this.completeNonContinuousTask(task.id);
-                                return;
-                            }
-
-                            this.openCompleteTimeModal(task.id, checkbox, originalState);
-                        } else if (checkbox.checked) {
-                            // 已設置時間或已完成過，直接更新
-                            this.updateTask(task.id, this.buildCompletionUpdates(task));
-                            // 迴圈任務：若尚未建立下一次副本，補充建立
-                            if (task.recurring && task.recurring.enabled && !task.recurringCreated) {
-                                this.createNextRecurringTask(task);
-                            }
-                            this.updateUI();
-                        } else {
-                            // 取消完成
-                            this.updateTask(task.id, { completed: false });
-                            this.updateUI();
+                        if (task.estimatedTime === 'non-continuous') {
+                            this.completeNonContinuousTask(task.id);
+                            return;
                         }
-                    });
 
-                    // 添加拖動事件（drag 模式或群組視圖均可拖曳）
-                    if (isDraggable) {
-                        li.addEventListener('dragstart', (e) => {
-                            e.dataTransfer.effectAllowed = 'move';
-                            li.classList.add('dragging');
-                        });
-
-                        li.addEventListener('dragend', () => {
-                            li.classList.remove('dragging');
-                        });
-
-                        li.addEventListener('dragover', (e) => {
-                            e.preventDefault();
-                            e.dataTransfer.dropEffect = 'move';
-                            // 使用 li 目前所在的 ol 作為容器（支援三區塊跨段拖曳）
-                            const container = li.closest('ol') || taskList;
-                            const draggingElement = document.querySelector('.task-item.dragging');
-                            if (!draggingElement) return;
-                            const afterElement = this.getDragAfterElement(container, e.clientY);
-                            if (afterElement == null) {
-                                container.appendChild(draggingElement);
-                            } else {
-                                container.insertBefore(draggingElement, afterElement);
-                            }
-                        });
-                    }
-
-                    // 塊點擊事件
-                    if (task.blocks && task.blocks > 1) {
-                        const blocks = li.querySelectorAll('.task-block');
-                        blocks.forEach((block, index) => {
-                            block.addEventListener('click', (e) => {
-                                e.stopPropagation();
-                                // 切換該塊的完成狀態
-                                const completedBlocks = task.completedBlocks || 0;
-                                if (index < completedBlocks) {
-                                    // 取消該塊
-                                    const canceledTime = (task.blockTimes || [])[completedBlocks - 1] || 0;
-                                    this.updateTask(task.id, {
-                                        completedBlocks: completedBlocks - 1,
-                                        actualTime: Math.max(0, (task.actualTime || 0) - canceledTime)
-                                    });
-                                } else if (index === completedBlocks) {
-                                    // 完成該塊：開啟 block 時間記錄 modal
-                                    const newCompleted = completedBlocks + 1;
-                                    this.openBlockTimeModal(task.id, index, newCompleted);
-                                    return; // updateUI 由 modal 內部處理
-                                }
-                                this.updateUI();
-                            });
-                        });
-                    }
-
-                    // 重新安排到今天按鈕
-                    const rescheduleBtn = li.querySelector('.reschedule-today-btn');
-                    if (rescheduleBtn) {
-                        rescheduleBtn.addEventListener('click', (e) => {
-                            e.stopPropagation();
-                            this.rescheduleTaskToToday(task, localDateStr());
-                            this.showNotification('📅 已重新安排到今天');
-                            this.updateUI();
-                        });
-                    }
-
-                    // 點擊編輯（除了塊和複選框外）
-                    li.addEventListener('click', (e) => {
-                        if (!e.target.classList.contains('task-block') && e.target !== checkbox && !e.target.classList.contains('reschedule-today-btn')) {
-                            this.openEditModal(task.id);
+                        this.openCompleteTimeModal(task.id, checkbox, originalState);
+                    } else if (checkbox.checked) {
+                        // 已設置時間或已完成過，直接更新
+                        this.updateTask(task.id, this.buildCompletionUpdates(task));
+                        // 迴圈任務：若尚未建立下一次副本，補充建立
+                        if (task.recurring && task.recurring.enabled && !task.recurringCreated) {
+                            this.createNextRecurringTask(task);
                         }
-                    });
-
-                    // 三區塊模式：依日期分配至對應 section list
-                    if (isSectionView) {
-                        if (isTaskOverdue(task, todayMidnight)) {
-                            sectionOverdueList.appendChild(li);
-                        } else if (task.date === todayStr) {
-                            sectionTodayList.appendChild(li);
-                        } else if (task.date === tomorrowStr) {
-                            sectionTomorrowList.appendChild(li);
-                        } else if (task.date === dayAfterStr) {
-                            sectionDayAfterList.appendChild(li);
-                        } else {
-                            sectionLaterList.appendChild(li);
-                        }
+                        this.updateUI();
                     } else {
-                        taskList.appendChild(li);
+                        // 取消完成
+                        this.updateTask(task.id, { completed: false });
+                        this.updateUI();
                     }
                 });
 
-                if (isSectionView) {
-                    [
-                        { id: 'section-today-total', total: todayMinutes, completed: todayCompletedMinutes },
-                        { id: 'section-tomorrow-total', total: tomorrowMinutes, completed: tomorrowCompletedMinutes },
-                        { id: 'section-dayafter-total', total: dayAfterMinutes, completed: dayAfterCompletedMinutes }
-                    ].forEach(({ id, total, completed }) => {
-                        const el = document.getElementById(id);
-                        if (el) el.textContent = total > 0 ? `（已預定${formatDuration(total)}，完成${formatDuration(completed)}，剩餘${formatDuration(total - completed)}）` : '';
+                // 添加拖動事件（drag 模式或群組視圖均可拖曳）；dragover 由委派監聽器統一處理
+                if (ctx.isDraggable) {
+                    li.addEventListener('dragstart', (e) => {
+                        e.dataTransfer.effectAllowed = 'move';
+                        li.classList.add('dragging');
                     });
+
+                    li.addEventListener('dragend', () => {
+                        li.classList.remove('dragging');
+                    });
+                }
+
+                // 塊點擊事件
+                if (task.blocks && task.blocks > 1) {
+                    const blocks = li.querySelectorAll('.task-block');
+                    blocks.forEach((block, index) => {
+                        block.addEventListener('click', (e) => {
+                            e.stopPropagation();
+                            // 切換該塊的完成狀態
+                            const completedBlocks = task.completedBlocks || 0;
+                            if (index < completedBlocks) {
+                                // 取消該塊
+                                const canceledTime = (task.blockTimes || [])[completedBlocks - 1] || 0;
+                                this.updateTask(task.id, {
+                                    completedBlocks: completedBlocks - 1,
+                                    actualTime: Math.max(0, (task.actualTime || 0) - canceledTime)
+                                });
+                            } else if (index === completedBlocks) {
+                                // 完成該塊：開啟 block 時間記錄 modal
+                                const newCompleted = completedBlocks + 1;
+                                this.openBlockTimeModal(task.id, index, newCompleted);
+                                return; // updateUI 由 modal 內部處理
+                            }
+                            this.updateUI();
+                        });
+                    });
+                }
+
+                // 重新安排到今天按鈕
+                const rescheduleBtn = li.querySelector('.reschedule-today-btn');
+                if (rescheduleBtn) {
+                    rescheduleBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        this.rescheduleTaskToToday(task, localDateStr());
+                        this.showNotification('📅 已重新安排到今天');
+                        this.updateUI();
+                    });
+                }
+
+                // 暫存卡片快捷排程鈕（今天／明天）
+                li.querySelectorAll('.staging-actions button').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const target = btn.dataset.stageAct === 'tomorrow'
+                            ? addDaysToDate(localDateStr(), 1)
+                            : localDateStr();
+                        this.updateTask(task.id, { date: target });
+                        this.showNotification(btn.dataset.stageAct === 'tomorrow' ? '🌅 已排入明天' : '📅 已排入今天');
+                        this.updateUI();
+                    });
+                });
+
+                // 點擊編輯（除了塊和複選框外）
+                li.addEventListener('click', (e) => {
+                    if (!e.target.classList.contains('task-block') && e.target !== checkbox
+                        && !e.target.classList.contains('reschedule-today-btn')
+                        && !e.target.closest('.staging-actions')) {
+                        this.openEditModal(task.id);
+                    }
+                });
+
+                return li;
+            }
+
+            // 把任務卡放進正確的容器：section 視圖依 暫存/逾期/日期 分派，其他視圖直接進 #taskList
+            _placeCard(li, task, sections, { isSectionView, todayStr, todayMidnight, tomorrowStr, dayAfterStr }) {
+                if (!isSectionView) {
+                    document.getElementById('taskList').appendChild(li);
+                    return;
+                }
+                let key;
+                if (isStagedTask(task)) key = 'staging';
+                else if (isTaskOverdue(task, todayMidnight)) key = 'overdue';
+                else if (task.date === todayStr) key = 'today';
+                else if (task.date === tomorrowStr) key = 'tomorrow';
+                else if (task.date === dayAfterStr) key = 'dayafter';
+                else key = 'later';
+                sections[key].appendChild(li);
+            }
+
+            // section 視圖收尾：填今天/明天/後天時數、暫存區計數，並隱藏空區塊
+            _finalizeSections(totals, sections) {
+                [
+                    { id: 'section-today-total', t: totals.today },
+                    { id: 'section-tomorrow-total', t: totals.tomorrow },
+                    { id: 'section-dayafter-total', t: totals.dayafter }
+                ].forEach(({ id, t }) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = t.total > 0 ? `（已預定${formatDuration(t.total)}，完成${formatDuration(t.completed)}，剩餘${formatDuration(t.total - t.completed)}）` : '';
+                });
+
+                const stagingCountEl = document.getElementById('section-staging-count');
+                if (stagingCountEl && sections.staging) {
+                    const n = sections.staging.children.length;
+                    stagingCountEl.textContent = n > 0 ? `（${n} 項）` : '';
                 }
 
                 // 區塊無任務時隱藏
-                if (isSectionView) {
-                    ['overdue', 'today', 'tomorrow', 'dayafter', 'later'].forEach(sec => {
-                        const section = document.getElementById(`section-${sec}`);
-                        const list = document.getElementById(`taskList-${sec}`);
-                        if (section && list) section.style.display = list.children.length === 0 ? 'none' : '';
-                    });
-                }
-
-                // drop 監聽器統一由 setupEventListeners 處理，此處不重複綁定
+                ['staging', 'overdue', 'today', 'tomorrow', 'dayafter', 'later'].forEach(sec => {
+                    const section = document.getElementById(`section-${sec}`);
+                    const list = document.getElementById(`taskList-${sec}`);
+                    if (section && list) section.style.display = list.children.length === 0 ? 'none' : '';
+                });
             }
 
             getTaskDueStatus(task) {
@@ -2026,6 +2092,17 @@
                 }, { offset: Number.NEGATIVE_INFINITY }).element;
             }
 
+            // 拖曳落點的時刻推算：取前一張「有時刻」的卡 → 該卡時刻 + 該卡預計耗時。
+            // 落在區塊最前面、或前一張也沒時刻 → 回傳 null（歸入當天「未指定時刻」區）
+            computeDropTime(draggingEl) {
+                let node = draggingEl.previousElementSibling;
+                while (node && !node.classList.contains('task-item')) node = node.previousElementSibling;
+                if (!node) return null;
+                const prev = this.getTaskById(node.dataset.taskId);
+                if (!prev || !prev.time) return null;
+                return minutesToTime(timeToMinutes(prev.time) + getTaskPlannedMinutes(prev));
+            }
+
             saveTaskOrder() {
                 // 三區塊視圖下從各 section list 收集任務
                 const isSectionView = this.currentFilter === 'all' && document.querySelector('.section-task-list');
@@ -2056,7 +2133,8 @@
 
             updateStats() {
                 const statsContainer = document.getElementById('statsContainer');
-                const allTasks = this.tasks.filter(t => !t.compressed);
+                // 暫存任務不列入任何統計
+                const allTasks = this.tasks.filter(t => !t.compressed && !isStagedTask(t));
                 const todayStr = localDateStr();
                 const todayMidnight = getTodayMidnight();
 
@@ -2154,7 +2232,8 @@
                     const today = localDateStr();
                     document.querySelector('input[name="dateMode"][value="scheduled"]').checked = true;
                     document.getElementById('taskDate').value = today;
-                    document.getElementById('taskDate').style.display = 'block';
+                    document.getElementById('dateInputGroup').style.display = 'block';
+                    document.getElementById('taskTime').value = '';
 
                     // 設置預計時間為 10min 並隱藏 block 選擇
                     document.querySelector('input[name="estimatedTime"][value="10min"]').checked = true;
@@ -2257,6 +2336,7 @@
                         } else {
                             dateInputGroup.style.display = 'none';
                             document.getElementById('taskDate').value = '';
+                            document.getElementById('taskTime').value = '';
                         }
                     });
                 });
@@ -2333,14 +2413,32 @@
                     }
                 });
 
+                // 統一 dragover 監聽器（只綁定一次，委派處理所有視圖的拖曳重定位）
+                const taskListEl = document.getElementById('taskList');
+                taskListEl.addEventListener('dragover', (e) => {
+                    const draggingEl = document.querySelector('.task-item.dragging');
+                    if (!draggingEl) return;
+                    // section 視圖：落點必須在某個區塊的 <ol> 上（標題列等空隙不處理）；
+                    // 清單/群組視圖：容器即 #taskList 自身
+                    const inSectionView = taskListEl.querySelector('.section-task-list') !== null;
+                    const container = inSectionView ? e.target.closest('.section-task-list') : taskListEl;
+                    if (!container) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const after = this.getDragAfterElement(container, e.clientY);
+                    if (after == null) container.appendChild(draggingEl);
+                    else container.insertBefore(draggingEl, after);
+                });
+
                 // 統一 drop 監聽器（只綁定一次）
                 document.addEventListener('drop', (e) => {
                     const canDrop = this.sortMode === 'drag' || this.currentFilter.startsWith('group:');
                     const isSectionView = this.currentFilter === 'all';
 
                     if (isSectionView) {
-                        // 三區塊：依落點 section 更新任務日期
+                        // 三區塊：依落點 section 更新任務日期與當天時刻
                         const draggingEl = document.querySelector('.task-item.dragging');
+                        let sectionChanged = false;
                         if (draggingEl) {
                             const taskId = draggingEl.dataset.taskId;
                             const section = draggingEl.closest('.time-section');
@@ -2348,23 +2446,52 @@
                                 const sectionType = section.dataset.section;
                                 const todayStr = localDateStr();
                                 const tomorrowStr = addDaysToDate(todayStr, 1);
+                                const dayAfterStr = addDaysToDate(todayStr, 2);
                                 const task = this.getTaskById(taskId);
 
-                                if (sectionType === 'today' && task && task.date !== todayStr) {
-                                    this.updateTask(taskId, { date: todayStr });
-                                    this.showNotification('📅 已移至今天');
-                                } else if (sectionType === 'tomorrow' && task && task.date !== tomorrowStr) {
-                                    this.updateTask(taskId, { date: tomorrowStr });
-                                    this.showNotification('🌅 已移至明天');
+                                if (sectionType === 'staging') {
+                                    if (task && task.date) {
+                                        this.updateTask(taskId, { date: '', time: null });
+                                        this.showNotification('📥 已移入暫存區');
+                                        sectionChanged = true;
+                                    }
+                                } else if (sectionType === 'today') {
+                                    if (task && task.date !== todayStr) {
+                                        this.updateTask(taskId, { date: todayStr });
+                                        this.showNotification('📅 已移至今天');
+                                        sectionChanged = true;
+                                    }
+                                } else if (sectionType === 'tomorrow') {
+                                    if (task && task.date !== tomorrowStr) {
+                                        this.updateTask(taskId, { date: tomorrowStr });
+                                        this.showNotification('🌅 已移至明天');
+                                        sectionChanged = true;
+                                    }
+                                } else if (sectionType === 'dayafter') {
+                                    if (task && task.date !== dayAfterStr) {
+                                        this.updateTask(taskId, { date: dayAfterStr });
+                                        this.showNotification('🌤️ 已移至後天');
+                                        sectionChanged = true;
+                                    }
                                 } else if (sectionType === 'later') {
-                                    // 若任務原本是今天或明天，開啟 edit modal 選擇具體日期
-                                    if (task && (task.date === todayStr || task.date === tomorrowStr || !task.date)) {
+                                    // 若任務原本是今天/明天/後天/暫存，開啟 edit modal 選擇具體日期
+                                    if (task && (task.date === todayStr || task.date === tomorrowStr || task.date === dayAfterStr || !task.date)) {
                                         setTimeout(() => this.openEditModal(taskId), 50);
+                                    }
+                                }
+
+                                // 有具體日期的三個區塊：依落點前一張卡推算並寫入時刻
+                                if (['today', 'tomorrow', 'dayafter'].includes(sectionType) && task) {
+                                    const newTime = this.computeDropTime(draggingEl);
+                                    if (newTime !== (task.time || null)) {
+                                        this.updateTask(taskId, { time: newTime });
+                                        sectionChanged = true;
                                     }
                                 }
                             }
                         }
                         this.saveTaskOrder();
+                        if (sectionChanged) this.updateUI();
                     } else if (canDrop) {
                         this.saveTaskOrder();
                     }
@@ -2448,6 +2575,7 @@
                 }
                 document.querySelector(`input[name="dateMode"][value="${dateMode}"]`).checked = true;
                 document.getElementById('taskDate').value = task.date || '';
+                document.getElementById('taskTime').value = task.time || '';
                 document.getElementById('dateInputGroup').style.display = dateMode === 'scheduled' ? 'block' : 'none';
 
                 // 設置釘選狀態
@@ -2749,8 +2877,16 @@
                     }
                 }
 
-                // 迴圈結束日期檢查
-                if (completedTask.recurring.untilDate && nextDate && nextDate > completedTask.recurring.untilDate) {
+                // 迴圈終止檢查：有「重複次數」時以次數為準（不受結束日期提前卡死）；否則以結束日期為準
+                const rec = completedTask.recurring;
+                const doneCount = rec.completedCount || 0;   // 完成 completedTask 本身即第 (doneCount + 1) 次
+                if (rec.repeatCount) {
+                    if (doneCount + 1 >= rec.repeatCount) {
+                        this.updateTask(completedTask.id, { recurring: { ...rec, completedCount: doneCount + 1 }, recurringCreated: true });
+                        this.showNotification(`🔁 已完成指定的 ${rec.repeatCount} 次，迴圈結束`);
+                        return;
+                    }
+                } else if (rec.untilDate && nextDate && nextDate > rec.untilDate) {
                     this.showNotification('🔁 已到達迴圈結束日期，不再建立新任務');
                     return;
                 }
@@ -2767,6 +2903,7 @@
                     title: completedTask.title,
                     description: completedTask.description,
                     date: nextDate,
+                    time: completedTask.time || null,
                     estimatedTime: completedTask.estimatedTime,
                     blocks: completedTask.blocks,
                     completedBlocks: 0,
@@ -2785,9 +2922,23 @@
                     pinned: completedTask.pinned || null
                 };
 
+                // 有「重複次數」時，依新一次的日期把預定結束日期校正為「涵蓋到做滿總次數」
+                this.recomputeRecurringUntil(newTask);
+
                 this.addTask(newTask);
                 this.updateTask(completedTask.id, { recurringCreated: true });
                 this.showNotification(`🔁 已自動建立下一次：${nextDate}`);
+            }
+
+            // 有「重複次數」的迴圈任務：依「本次日期 + 剩餘次數 × 間隔」重算預定結束日期，
+            // 確保逾期順延後結束日期仍涵蓋到做滿指定總次數（就地修改 task.recurring）
+            recomputeRecurringUntil(task) {
+                const rec = task && task.recurring;
+                if (!rec || !rec.enabled || !rec.repeatCount) return;
+                if (!task.date || task.date === '9999-12-31') return;
+                const remaining = rec.repeatCount - ((rec.completedCount || 0) + 1); // 本次之後還要做幾次
+                if (remaining < 0) return;
+                rec.untilDate = addDaysToDate(task.date, rec.interval * remaining);
             }
 
             completeNonContinuousTask(taskId) {
@@ -2847,6 +2998,9 @@
             rescheduleTaskToToday(task, todayStr, affectedGroupIds) {
                 this.recordOverdueLoss(task);
                 this.updateTask(task.id, { date: todayStr });
+                // 有「重複次數」的迴圈任務被順延 → 一併順延預定結束日期，涵蓋到做滿總次數
+                this.recomputeRecurringUntil(task);
+                this.saveToStorage();
                 if (task.groupId && task.groupDelayMode === 'auto') {
                     if (affectedGroupIds) {
                         affectedGroupIds.add(task.groupId);
@@ -2912,24 +3066,17 @@
             openStatsModal() {
                 this.openModal('statsModal');
 
-                // 默認顯示今天的統計
-                document.getElementById('todayStatsBtn').classList.add('active');
-                document.getElementById('weekStatsBtn').classList.remove('active');
-                document.getElementById('monthStatsBtn').classList.remove('active');
-
-                const todayBtn = document.getElementById('todayStatsBtn');
-                const weekBtn = document.getElementById('weekStatsBtn');
-                const monthBtn = document.getElementById('monthStatsBtn');
                 const statsPeriodBtns = [
-                    { btn: todayBtn, period: 'today' },
-                    { btn: weekBtn, period: 'week' },
-                    { btn: monthBtn, period: 'month' }
+                    { btn: document.getElementById('todayStatsBtn'), period: 'today' },
+                    { btn: document.getElementById('weekStatsBtn'), period: 'week' },
+                    { btn: document.getElementById('monthStatsBtn'), period: 'month' }
                 ];
                 statsPeriodBtns.forEach(({ btn, period }) => {
                     btn.onclick = () => this.setStatsPeriod(period, statsPeriodBtns);
                 });
 
-                this.renderStats('today');
+                // 默認顯示今天的統計（切換 active class 與渲染都交給 setStatsPeriod）
+                this.setStatsPeriod('today', statsPeriodBtns);
             }
 
             setStatsPeriod(period, statsPeriodBtns) {
@@ -3267,6 +3414,26 @@
             }
 
             renderStats(period) {
+                const { startDateStr, stats, nonContinuousTasks, totalTimeBalance, hasOverdueLossInRange } = this._collectStatsData(period);
+
+                this._renderStatsSummary(stats, totalTimeBalance);
+
+                // 若區間內有逾期重新安排的損失記錄，即使沒有已完成任務，仍須往下渲染每日趨勢圖
+                if (stats.tasks.length === 0 && nonContinuousTasks.length === 0 && !hasOverdueLossInRange) {
+                    document.getElementById('statsTable').innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">暫無完成任務</div>';
+                    document.getElementById('nonContinuousCount').textContent = '';
+                    document.getElementById('categoryBreakdown').innerHTML = '';
+                    document.getElementById('dailyTrendChart').innerHTML = '';
+                    return;
+                }
+
+                this._renderStatsTable(stats, nonContinuousTasks, period);
+                this._renderCategoryBreakdown(stats);
+                this._renderDailyTrend(stats, period, startDateStr);
+            }
+
+            // 蒐集指定期間的統計資料（暫存任務排除；壓縮任務已預存 plannedTime/actualTime，與一般任務同路徑）
+            _collectStatsData(period) {
                 const now = new Date();
                 let startDate;
 
@@ -3287,7 +3454,7 @@
 
                 // 分離非連續與有時間的任務（含壓縮任務）
                 const allCompleted = this.tasks.filter(t => {
-                    if (!t.completed) return false;
+                    if (!t.completed || isStagedTask(t)) return false;
                     const d = t.completedDate || (t.completedAt ? t.completedAt.split('T')[0] : null);
                     return d && d >= startDateStr;
                 });
@@ -3295,7 +3462,6 @@
                 const nonContinuousTasks = allCompleted.filter(t => t.estimatedTime === 'non-continuous');
                 const timedTasks         = allCompleted.filter(t => t.estimatedTime !== 'non-continuous');
 
-                // 統一計算統計（壓縮任務已預存 plannedTime/actualTime，與一般任務同路徑）
                 const stats = { plannedTime: 0, actualTime: 0, tasks: [] };
 
                 timedTasks.forEach(task => {
@@ -3319,21 +3485,24 @@
                     if (rec.date >= startDateStr) totalTimeBalance -= rec.minutes;
                 });
 
-                // 更新摘要
+                const hasOverdueLossInRange = this.overdueLossLog.some(rec => rec.date >= startDateStr);
+
+                return { startDateStr, stats, nonContinuousTasks, totalTimeBalance, hasOverdueLossInRange };
+            }
+
+            _renderStatsSummary(stats, totalTimeBalance) {
                 document.getElementById('totalPlanned').textContent = stats.plannedTime + '分';
                 document.getElementById('totalActual').textContent = stats.actualTime + '分';
                 document.getElementById('totalDiff').textContent = `${totalTimeBalance > 0 ? '+' : ''}${totalTimeBalance}分`;
+            }
 
-                // 渲染表格
+            // 逐任務時間收支表：僅「今天」模式呈現（本週／本月不建立即丟的字串）
+            _renderStatsTable(stats, nonContinuousTasks, period) {
                 const statsTable = document.getElementById('statsTable');
                 const ncEl = document.getElementById('nonContinuousCount');
-                // 若區間內有逾期重新安排的損失記錄，即使沒有已完成任務，仍須往下渲染每日趨勢圖
-                const hasOverdueLossInRange = this.overdueLossLog.some(rec => rec.date >= startDateStr);
-                if (stats.tasks.length === 0 && nonContinuousTasks.length === 0 && !hasOverdueLossInRange) {
-                    statsTable.innerHTML = '<div style="text-align: center; color: var(--text-secondary); padding: 20px;">暫無完成任務</div>';
+                if (period !== 'today') {
+                    statsTable.innerHTML = '';
                     ncEl.textContent = '';
-                    document.getElementById('categoryBreakdown').innerHTML = '';
-                    document.getElementById('dailyTrendChart').innerHTML = '';
                     return;
                 }
 
@@ -3375,17 +3544,14 @@
                 });
 
                 tableHtml += '</tbody></table>';
-                if (period === 'today') {
-                    statsTable.innerHTML = tableHtml;
-                    ncEl.textContent = nonContinuousTasks.length > 0
-                        ? `另有 ${nonContinuousTasks.length} 個非連續任務已完成（未計入時間統計）`
-                        : '';
-                } else {
-                    statsTable.innerHTML = '';
-                    ncEl.textContent = '';
-                }
+                statsTable.innerHTML = tableHtml;
+                ncEl.textContent = nonContinuousTasks.length > 0
+                    ? `另有 ${nonContinuousTasks.length} 個非連續任務已完成（未計入時間統計）`
+                    : '';
+            }
 
-                // 分類分析（2個以上分類才顯示）
+            // 分類分析（2 個以上分類才顯示）
+            _renderCategoryBreakdown(stats) {
                 const byCategory = {};
                 stats.tasks.forEach(t => {
                     if (!byCategory[t.category]) byCategory[t.category] = { planned: 0, actual: 0, timeBalance: 0, count: 0 };
@@ -3416,8 +3582,10 @@
                 } else {
                     catEl.innerHTML = '';
                 }
+            }
 
-                // 每日趨勢圖（本週／本月模式）：預定時間／實際時間折線圖，日期名稱融入當日提前/準時/超時 emoji
+            // 每日趨勢圖（本週／本月模式）：預定時間／實際時間折線圖，日期名稱融入當日提前/準時/超時 emoji
+            _renderDailyTrend(stats, period, startDateStr) {
                 const trendEl = document.getElementById('dailyTrendChart');
                 if (period === 'week' || period === 'month') {
                     const dayStats = {};
@@ -3565,6 +3733,9 @@
                 }
                 // 未排程 (unscheduled) 時 date 保持為空字符串
 
+                // 當天時刻（僅具體日期適用）
+                const time = (dateMode === 'scheduled') ? (document.getElementById('taskTime').value || null) : null;
+
                 const estimatedTime = document.querySelector('input[name="estimatedTime"]:checked').value;
                 let blocks = null;
                 if (estimatedTime === '30plus') {
@@ -3575,6 +3746,7 @@
                     title,
                     description: document.getElementById('taskDescription').value.trim(),
                     date: date,
+                    time: time,
                     estimatedTime: estimatedTime,
                     blocks: blocks,
                     completedBlocks: 0,
@@ -3591,7 +3763,10 @@
                 };
 
                 if (document.getElementById('taskRecurring').checked) {
+                    // 保留既有 recurring 的其他欄位（尤其 completedCount），只覆寫表單控制的三項
+                    const prevRec = this.currentEditingTask?.recurring || {};
                     taskData.recurring = {
+                        ...prevRec,
                         enabled: true,
                         interval: parseInt(document.getElementById('recurringDays').value),
                         untilDate: document.getElementById('recurringUntilDate').value || null,
@@ -3686,23 +3861,24 @@
                     this.updateGroupTaskDates(taskData.groupId, savedTaskId);
                 }
 
+                // 非群組迴圈任務：依「本次日期 + 剩餘次數 × 間隔」校正預定結束日期
+                const savedTask = this.getTaskById(savedTaskId);
+                if (savedTask && !savedTask.groupId) {
+                    this.recomputeRecurringUntil(savedTask);
+                    this.saveToStorage();
+                }
+
                 this.updateUI();
             }
 
             getGroupsList() {
                 const groups = {};
                 this.tasks.forEach(task => {
-                    if (task.recurring && task.recurring.enabled && task.groupId) {
-                        if (!groups[task.groupId]) {
-                            groups[task.groupId] = {
-                                groupId: task.groupId,
-                                name: task.groupName || task.groupId,
-                                tasks: [],
-                                activeTasks: 0
-                            };
-                        }
-                        groups[task.groupId].tasks.push(task);
-                        if (!task.completed) groups[task.groupId].activeTasks++;
+                    if (task.recurring && task.recurring.enabled && task.groupId && !groups[task.groupId]) {
+                        groups[task.groupId] = {
+                            groupId: task.groupId,
+                            name: task.groupName || task.groupId
+                        };
                     }
                 });
                 return Object.values(groups);
@@ -3770,6 +3946,9 @@
                         task.date = localDateStr(newDate);
                     });
                 }
+
+                // 日期重排後，含「重複次數」的任務同步校正各自的預定結束日期
+                activeTasks.forEach(t => this.recomputeRecurringUntil(t));
 
                 this.saveToStorage();
             }

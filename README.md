@@ -5,7 +5,7 @@
 此資料夾用於 **Claude Code 維護和開發 TodoMaster 應用**。
 
 **主應用**：`TodoMaster.html`  
-**版本**：5.6.2 (2026-08-26)  
+**版本**：6.0.1 (2026-08-30)  
 **狀態**：✅ 穩定版本  
 **責任方**：Claude Code
 
@@ -23,7 +23,9 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 ### 任務管理
 - ✅ 創建、編輯、刪除、複製任務
 - 🏷️ 標籤系統（分類和快速搜尋）
-- 📅 日期設定（具體日期、未排程、不限期）
+- 📅 日期設定（具體日期、📥 暫存區、不限期）
+- 📥 **暫存區** — 放未規劃時間/細節的任務，不列入任何篩選與統計，只在首頁最上方可見，可用快捷鈕或拖曳隨時排入某天
+- 🕐 **當天時刻 HH:MM** — 任務可指定當天時刻，一天內依時刻由早到晚自動排序（未指定時刻者排在最前）；拖曳到某任務下方會依「前一項時刻＋前一項預計耗時」自動推算時刻
 - ⚡ 快速日期選擇（今天、明天、後天、下週一～日）
 - ⏱️ Block 時間估計（10 分鐘內、30 分鐘/1 block、多 blocks、非連續）
 - 📊 任務統計（完成率、時間節省/延遲分析）
@@ -36,8 +38,8 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 - 🔍 **復盤**（Review - 回顧/反思）
 
 ### 視圖和過濾
-- 📊 所有任務（依到期日分區：逾期／今天／明天／後天／更久以後，今天／明天／後天分區即時顯示已預定／完成／剩餘時數）
-- 按分類和標籤過濾
+- 📊 所有任務（依到期日分區：📥 暫存區／逾期／今天／明天／後天／更久以後，今天／明天／後天分區即時顯示已預定／完成／剩餘時數）
+- 按分類和標籤過濾（暫存區任務不列入任何分類/標籤/群組篩選，也不計入統計卡）
 
 ### 排序功能
 - 拖曳排序（Drag & Drop）
@@ -46,9 +48,10 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 - 時間追蹤（實際完成時間 vs 預計時間）
 
 ### 迴圈群組
-- 定時迴圈任務（自訂間隔天數 + 結束日期）
+- 定時迴圈任務（自訂間隔天數 + 結束日期 / 重複次數）
 - 任務群組管理（群組內拖曳排序、自動日期計算）
 - 完成後自動建立下次任務，並標示「已完成N次」
+- 🔁 **重複次數優先** — 設有「重複次數」時，以「做滿 N 次」為終止條件；任務被逾期順延（重新安排到今天／自動建立下一次／群組重算）時，「預定結束日期」依「本次日期＋剩餘次數×間隔」自動順延，確保不會在做滿次數前提前結束
 
 ### 完成時間分析
 - **一般**：套用預計時間
@@ -83,6 +86,27 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 ---
 
 ## 版本歷史
+
+### v6.0.1 (2026-08-30) - 程式碼清理與結構重構
+- 🔍 全檔審查（方法呼叫點、重複定義、可簡化邏輯）：62 個類別方法、18 個模組層函式全部有定義且被呼叫；無重複方法定義、無重複 HTML `id`；括號配對正確
+- 🧹 **死碼刪除**：
+  - `getGroupsList()` 精簡為只蒐集 `groupId → name`（原本每組還累加 `tasks[]`／`activeTasks`，唯一呼叫端 `renderGroups()` 從未讀取）
+  - 移除「新增任務」按鈕 handler 內 `#taskDate.style.display = 'block'` 無效行（全檔從未把 `#taskDate` 設為 `display:none`，只切換外層 `#dateInputGroup`）
+  - 移除 `@media (max-width:768px)` 內 `.app-container { grid-template-columns: 1fr }`（`.app-container` 是 `display:flex`，grid 屬性無效）
+- 🧹 **重複邏輯收斂**：`rescheduleTaskToToday()` 內嵌重寫的「`untilDate = 本次日期 + 間隔 × 剩餘次數`」公式改為直接呼叫既有的 `recomputeRecurringUntil()`，單一真實來源（行為等價）
+- 🧱 **結構重構（純 extract method，行為保持）**：
+  - `renderTasks()`（~375 行）拆為 `_buildSectionScaffold` / `_computeSectionTotals` / `_createTaskCard` / `_placeCard` / `_finalizeSections`，本體縮為 ~30 行協調流程
+  - `renderStats()`（~260 行）拆為 `_collectStatsData` / `_renderStatsSummary` / `_renderStatsTable` / `_renderCategoryBreakdown` / `_renderDailyTrend`，本體縮為 ~15 行；逐任務表格字串改為僅「今天」模式才建構（本週／本月原本建構後直接丟棄）
+  - `openStatsModal()` 的「手動切 active class + `renderStats('today')`」收斂為一句 `setStatsPeriod('today', …)`
+  - dragover 綁定收斂：原本每次 `renderTasks()` 重綁「section `<ol>` 層 + 每張 `<li>` 層」兩處近乎相同的重定位邏輯，改為在 `setupEventListeners()` 於 `#taskList` **綁定一次**的委派監聽器（比照既有的 `drop` 監聽器）
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v6.0.1`
+
+### v6.0 (2026-08-30) - 暫存區、每日時間排序、迴圈次數順延
+- ✅ **暫存區**：把「未排程」升級為獨立暫存區（`date === ''`）——在首頁「所有任務」最上方新增可收合的「📥 暫存區」區塊，放未規劃時間/細節的任務；暫存任務**不列入**任何分類/標籤/群組篩選、四張統計卡、時間統計與各分區時數。卡片提供「📅 今天／📅 明天」快捷鈕，也可直接拖曳進日期分區排入（拖回暫存區則清除日期與時刻）。新增 `isStagedTask()` helper
+- ✅ **當天時刻 HH:MM**：任務新增選填 `time` 欄位（編輯彈窗「具體日期」下方）。拖曳模式下，同一天內「有時刻」的任務依 HH:MM 由早到晚自動排序，「未指定時刻」的排在當天最前。拖曳一張卡到某任務下方時，依「前一項時刻 ＋ 前一項預計耗時」自動推算並寫入時刻（例：拖到 10:00／預計 30 分的任務下方 → 自動變 10:30）；拖到當天最前則清除時刻。新增 `timeToMinutes()`／`minutesToTime()`／`computeDropTime()`。卡片以 `🕐 HH:MM` 顯示。統一 `drop` 監聽器補上「後天」分區的日期落點處理
+- ✅ **迴圈「重複次數」順延結束日期**：設有 `repeatCount` 時，`createNextRecurringTask()` 改以「已完成次數達 N」為終止條件，不再被提前到的 `untilDate` 卡死；任務每次被順延（重新安排到今天／自動建立下一次／群組日期重算／手動編輯）時，`untilDate` 依「本次日期 ＋ 剩餘次數 × 間隔」自動重算，確保結束日期永遠涵蓋到做滿指定總次數。新增 `recomputeRecurringUntil()`；任務徽章在有次數時同時顯示「共 N 次 至 <日期>」
+- 🐛 順帶修正：編輯迴圈任務存檔時會遺失 `recurring.completedCount`（`saveTask()` 重建 recurring 物件時未保留既有欄位）；「新增任務」彈窗在編輯過暫存任務後不會還原日期輸入區
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v6.0`
 
 ### v5.6.2 (2026-08-26) - 程式碼清理
 - 🔍 全檔審查（方法呼叫點、重複定義、CSS/id 重複）：未發現未使用的方法或重複定義的函式/id，判定程式碼庫整體乾淨
@@ -325,23 +349,27 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ## 文件結構
 
-**TodoMaster.html** 包含三部分（共約 3810 行）：
+**TodoMaster.html** 包含三部分（共約 4025 行）：
 
-1. **HTML** (前 ~1220 行)
+1. **HTML** (前 ~1240 行)
    - 側邊欄菜單（視圖、分類、標籤、選項、同步備份）
    - 主內容區（任務列表、統計卡片）
    - 模態框：新增/編輯任務、標籤管理、完成時間詢問、Block 計時、時間統計
 
-2. **CSS** (~775 行)
+2. **CSS** (~800 行)
    - 暗黑主題變數（`--bg-primary`, `--accent-primary` 等）
    - 響應式設計：768px 作為手機/桌面斷點
    - `100svh` 支援 iOS 安全視口
 
-3. **JavaScript** (~2590 行)
+3. **JavaScript** (~2790 行)
    - `TodoApp` 類：任務 CRUD、UI 渲染、事件處理
    - `localStorage` 持久化
    - 任務類型系統（積累型/目標型/超前型）
+   - 暫存區（`isStagedTask`）、當天時刻排序（`computeDropTime` / `timeToMinutes` / `minutesToTime`）
+   - `renderTasks` / `renderStats` 拆分為 `_` 前綴私有 helper（`_createTaskCard` / `_buildSectionScaffold` / `_collectStatsData` / `_renderDailyTrend` 等）
+   - dragover 委派監聽器（`setupEventListeners()` 內綁定一次）
    - Block 分段計時（`blockTimeModal`）
+   - 迴圈次數與結束日期順延（`recomputeRecurringUntil`）
    - 同步備份（File System Access API）
    - 時間統計（每日趨勢圖、日曆視圖、分類分析）
 
@@ -455,7 +483,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ```
 TodoMaster/
-├── TodoMaster.html                        ← 【主文件】當前應用版本 (v5.6.2)
+├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.0.1)
 ├── README.md                              ← 【指南】本維護文檔
 └── backups/
     ├── TodoMaster_v{版本}_{日期}.html     ← 【備份】完整版本備份
@@ -498,6 +526,6 @@ A: 新版本需完全相容舊版本的 localStorage 格式，做好數據遷移
 
 > **維護指南**: 本 README 規範了 Claude Code 維護 TodoMaster 的工作流程、版本管理和檔案規範。每次修改前閱讀，修改後更新版本號和日誌。
 
-**最後更新**: 2026-07-28  
-**當前版本**: v5.5.2  
+**最後更新**: 2026-08-30  
+**當前版本**: v6.0.1  
 **應用狀態**: ✅ 穩定版本
