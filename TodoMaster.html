@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.0.1 - 任務管理工具</title>
+    <title>TodoMaster v6.0.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -846,7 +846,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.0.1';
+        const APP_VERSION = 'v6.0.2';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1485,6 +1485,8 @@
             init() {
                 try {
                     this.loadFromStorage();
+                    const purged = this.purgeOldData();
+                    if (purged > 0) this.showNotification(`🧹 已清除 ${purged} 個完成超過 30 天的任務`);
                     this.setupEventListeners();
                     this.setupBackupListeners();
                     this.updateUI();
@@ -2380,7 +2382,9 @@
                         if (targetId === 'compressBtn') {
                             const count = this.tasks.filter(t => t.completed && !t.compressed).length;
                             if (count === 0) {
-                                this.showNotification('沒有可壓縮的已完成任務');
+                                const removed = this.purgeOldData();
+                                if (removed > 0) this.updateUI();
+                                this.showNotification(removed > 0 ? `🧹 已清除 ${removed} 筆逾30天舊資料` : '沒有可壓縮的已完成任務');
                             } else if (confirm(`壓縮 ${count} 個已完成任務？\n將清除詳細資料，只保留名稱、分類、時間收支與精準度。`)) {
                                 this.compressCompletedTasks();
                             }
@@ -3010,6 +3014,31 @@
                 }
             }
 
+            // 清除「完成日期」超過 30 天的已完成任務，以及 30 天前的逾期損失記錄，避免資料無限累積。
+            // 由 init()（開 App 時）與 compressCompletedTasks()／壓縮鈕共用。回傳被清除的「任務」筆數。
+            purgeOldData() {
+                const cutoff = new Date();
+                cutoff.setDate(cutoff.getDate() - 30);
+                const cutoffStr = localDateStr(cutoff);
+
+                const beforeLen = this.tasks.length;
+                this.tasks = this.tasks.filter(t => {
+                    if (!t.completed) return true;
+                    const ref = t.completedDate
+                             || (t.completedAt ? t.completedAt.split('T')[0] : null)
+                             || t.date;
+                    return !ref || ref >= cutoffStr;
+                });
+                const removedTasks = beforeLen - this.tasks.length;
+
+                const beforeLoss = this.overdueLossLog.length;
+                this.overdueLossLog = this.overdueLossLog.filter(rec => rec.date >= cutoffStr);
+                const removedLoss = beforeLoss - this.overdueLossLog.length;
+
+                if (removedTasks > 0 || removedLoss > 0) this.saveToStorage();
+                return removedTasks;
+            }
+
             compressCompletedTasks() {
                 let count = 0;
                 this.tasks = this.tasks.map(task => {
@@ -3043,20 +3072,7 @@
                     };
                 });
 
-                // 清除預定日期/完成日期超過30天前的舊壓縮資料，避免資料無限累積
-                const cutoff = new Date();
-                cutoff.setDate(cutoff.getDate() - 30);
-                const cutoffStr = localDateStr(cutoff);
-                const beforeLen = this.tasks.length;
-                this.tasks = this.tasks.filter(t => {
-                    if (!t.compressed) return true;
-                    const ref = t.completedDate || t.date;
-                    return !ref || ref >= cutoffStr;
-                });
-                const removed = beforeLen - this.tasks.length;
-
-                // 同步清除30天前的逾期損失記錄，避免無限累積
-                this.overdueLossLog = this.overdueLossLog.filter(rec => rec.date >= cutoffStr);
+                const removed = this.purgeOldData();
 
                 this.saveToStorage();
                 this.updateUI();
