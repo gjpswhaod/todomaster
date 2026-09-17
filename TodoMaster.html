@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.0.2 - 任務管理工具</title>
+    <title>TodoMaster v6.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -409,6 +409,26 @@
             opacity: 0.75;
         }
         .section-task-list { list-style: none; padding: 0; margin: 0; min-height: 36px; }
+        .period-group { margin-bottom: 2px; }
+        .period-header {
+            font-size: 0.68rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            opacity: 0.7;
+            padding: 6px 4px 4px 6px;
+            margin-bottom: 4px;
+            border-top: 1px dashed var(--bg-tertiary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            user-select: none;
+        }
+        /* 每天第一個時段（早上）緊接日期標題，不用再加一條分隔線 */
+        .time-section-header + .period-group .period-header {
+            border-top: none;
+            padding-top: 0;
+            margin-top: 0;
+        }
         .reschedule-all-btn {
             font-size: 0.7rem;
             padding: 2px 8px;
@@ -846,7 +866,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.0.2';
+        const APP_VERSION = 'v6.2';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -860,6 +880,11 @@
             '30plus': { emoji: '⏳', label: '30+分鐘' },
             'non-continuous': { emoji: '🔀', label: '非連續' }
         };
+        // 一天三時段：分界（分鐘數下界）與拖曳落在該段最前面時的預設時刻
+        const PERIOD_ORDER = ['morning', 'afternoon', 'evening'];
+        const PERIOD_BOUNDS = { morning: 0, afternoon: 12 * 60, evening: 18 * 60 };
+        const PERIOD_DEFAULT_TIME = { morning: '08:00', afternoon: '13:00', evening: '19:00' };
+        const PERIOD_LABELS = { morning: '🌄 早上', afternoon: '🌇 下午', evening: '🌙 晚上' };
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -925,6 +950,14 @@
         function minutesToTime(mins) {
             const v = Math.max(0, Math.min(23 * 60 + 59, Math.round(mins)));
             return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
+        }
+        // 依 task.time 判斷屬於當天哪個時段；無時刻 → 早上（沿用「未指定時刻排最前」慣例，侷限在早上段）
+        function getTimePeriod(time) {
+            const mins = timeToMinutes(time);
+            if (mins === null) return 'morning';
+            if (mins < PERIOD_BOUNDS.afternoon) return 'morning';
+            if (mins < PERIOD_BOUNDS.evening) return 'afternoon';
+            return 'evening';
         }
 
 </script>
@@ -1744,6 +1777,16 @@
                 // dragover / drop 監聽器統一由 setupEventListeners 綁定一次，此處不重複綁定
             }
 
+            // 單日分區內的早上/下午/晚上三段子清單 HTML（今天/明天/後天共用）
+            _periodBlocksHtml(dayKey) {
+                return PERIOD_ORDER.map(period => `
+                    <div class="period-group" data-period="${period}">
+                        <div class="period-header">${PERIOD_LABELS[period]}</div>
+                        <ol class="task-list section-task-list" id="taskList-${dayKey}-${period}" data-period="${period}"></ol>
+                    </div>
+                `).join('');
+            }
+
             // 建立三區塊視圖骨架，回傳各 section 的 <ol> 元素 map，並綁定「全部重新安排到今天」按鈕
             _buildSectionScaffold({ todayStr, todayMidnight }) {
                 document.getElementById('taskList').innerHTML = `
@@ -1759,15 +1802,15 @@
                     </div>
                     <div class="time-section" id="section-today" data-section="today">
                         <div class="time-section-header">📅 今天<span class="section-time-total" id="section-today-total"></span></div>
-                        <ol class="task-list section-task-list" id="taskList-today"></ol>
+                        ${this._periodBlocksHtml('today')}
                     </div>
                     <div class="time-section" id="section-tomorrow" data-section="tomorrow">
                         <div class="time-section-header">🌅 明天<span class="section-time-total" id="section-tomorrow-total"></span></div>
-                        <ol class="task-list section-task-list" id="taskList-tomorrow"></ol>
+                        ${this._periodBlocksHtml('tomorrow')}
                     </div>
                     <div class="time-section" id="section-dayafter" data-section="dayafter">
                         <div class="time-section-header">🌤️ 後天<span class="section-time-total" id="section-dayafter-total"></span></div>
-                        <ol class="task-list section-task-list" id="taskList-dayafter"></ol>
+                        ${this._periodBlocksHtml('dayafter')}
                     </div>
                     <div class="time-section" id="section-later" data-section="later">
                         <div class="time-section-header">🗓️ 更久以後</div>
@@ -1775,12 +1818,18 @@
                     </div>
                 `;
 
+                const periodMap = dayKey => ({
+                    morning: document.getElementById(`taskList-${dayKey}-morning`),
+                    afternoon: document.getElementById(`taskList-${dayKey}-afternoon`),
+                    evening: document.getElementById(`taskList-${dayKey}-evening`)
+                });
+
                 const sections = {
                     staging: document.getElementById('taskList-staging'),
                     overdue: document.getElementById('taskList-overdue'),
-                    today: document.getElementById('taskList-today'),
-                    tomorrow: document.getElementById('taskList-tomorrow'),
-                    dayafter: document.getElementById('taskList-dayafter'),
+                    today: periodMap('today'),
+                    tomorrow: periodMap('tomorrow'),
+                    dayafter: periodMap('dayafter'),
                     later: document.getElementById('taskList-later')
                 };
 
@@ -2032,7 +2081,11 @@
                 else if (task.date === tomorrowStr) key = 'tomorrow';
                 else if (task.date === dayAfterStr) key = 'dayafter';
                 else key = 'later';
-                sections[key].appendChild(li);
+                if (key === 'today' || key === 'tomorrow' || key === 'dayafter') {
+                    sections[key][getTimePeriod(task.time)].appendChild(li);
+                } else {
+                    sections[key].appendChild(li);
+                }
             }
 
             // section 視圖收尾：填今天/明天/後天時數、暫存區計數，並隱藏空區塊
@@ -2053,10 +2106,16 @@
                 }
 
                 // 區塊無任務時隱藏
-                ['staging', 'overdue', 'today', 'tomorrow', 'dayafter', 'later'].forEach(sec => {
+                ['staging', 'overdue', 'later'].forEach(sec => {
                     const section = document.getElementById(`section-${sec}`);
                     const list = document.getElementById(`taskList-${sec}`);
                     if (section && list) section.style.display = list.children.length === 0 ? 'none' : '';
+                });
+                // 今天/明天/後天：三段皆空才隱藏整個日期區塊，單一時段即使 0 筆也保留為拖放目標
+                ['today', 'tomorrow', 'dayafter'].forEach(sec => {
+                    const section = document.getElementById(`section-${sec}`);
+                    const count = PERIOD_ORDER.reduce((n, p) => n + (sections[sec][p]?.children.length || 0), 0);
+                    if (section) section.style.display = count === 0 ? 'none' : '';
                 });
             }
 
@@ -2094,15 +2153,21 @@
                 }, { offset: Number.NEGATIVE_INFINITY }).element;
             }
 
-            // 拖曳落點的時刻推算：取前一張「有時刻」的卡 → 該卡時刻 + 該卡預計耗時。
-            // 落在區塊最前面、或前一張也沒時刻 → 回傳 null（歸入當天「未指定時刻」區）
+            // 拖曳落點的時刻推算（v6.2）：在同一時段子清單中，往前找「有時刻」的卡 → 該卡時刻 + 該卡預計耗時。
+            // 找不到（落在子清單最前面、或往前都是未指定時刻的卡）→ 回退為該時段預設時刻，結果保證非 null。
             computeDropTime(draggingEl) {
+                const period = draggingEl.closest('.section-task-list')?.dataset.period || 'morning';
                 let node = draggingEl.previousElementSibling;
-                while (node && !node.classList.contains('task-item')) node = node.previousElementSibling;
-                if (!node) return null;
-                const prev = this.getTaskById(node.dataset.taskId);
-                if (!prev || !prev.time) return null;
-                return minutesToTime(timeToMinutes(prev.time) + getTaskPlannedMinutes(prev));
+                while (node) {
+                    if (node.classList.contains('task-item')) {
+                        const prev = this.getTaskById(node.dataset.taskId);
+                        if (prev && prev.time) {
+                            return minutesToTime(timeToMinutes(prev.time) + getTaskPlannedMinutes(prev));
+                        }
+                    }
+                    node = node.previousElementSibling;
+                }
+                return PERIOD_DEFAULT_TIME[period];
             }
 
             saveTaskOrder() {
