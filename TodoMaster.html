@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.2 - 任務管理工具</title>
+    <title>TodoMaster v6.2.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -866,7 +866,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.2';
+        const APP_VERSION = 'v6.2.1';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -3680,11 +3680,11 @@
                         dayStats[day].hasAhead  = dayStats[day].hasAhead || this.isAheadCompletion(t);
                     });
 
-                    // 逾期任務「重新安排到今天」的損失，記到原定日期那一天（視為當天的負值時間收支）
+                    // 逾期任務「重新安排到今天」的損失，記到原定日期那一天（僅視為當天的負值時間收支）；
+                    // 不增加當天預定時間——任務改期後會在新日期再計一次預定時間，這裡再加會重複計算
                     this.overdueLossLog.forEach(rec => {
                         if (rec.date < startDateStr) return;
                         if (!dayStats[rec.date]) dayStats[rec.date] = { actual: 0, planned: 0, balance: 0, hasAhead: false };
-                        dayStats[rec.date].planned += rec.minutes;
                         dayStats[rec.date].balance -= rec.minutes;
                     });
 
@@ -3705,7 +3705,8 @@
                         const hasAhead = ds ? ds.hasAhead : false;
                         // 符號改依當日淨時間收支（balance）判定，而非原始 actual-planned 差值：
                         // 累積型/超前完成任務本就允許「實際 > 預定」仍屬賺得，用差值會誤判為超時
-                        const symbol = (ds && ds.planned > 0) ? getTimingSymbol(-balance) : '';
+                        // 只有逾期損失（預定為 0、收支為負）的日子也要顯示符號，故以 balance !== 0 補足
+                        const symbol = (ds && (ds.planned > 0 || ds.balance !== 0)) ? getTimingSymbol(-balance) : '';
                         dayLabels.push({
                             date: `${d.getMonth() + 1}/${d.getDate()}`,
                             symbol,
