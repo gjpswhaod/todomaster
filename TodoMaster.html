@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.3.3 - 任務管理工具</title>
+    <title>TodoMaster v6.3.4 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -908,6 +908,12 @@
         .dup-tag { color: var(--accent-secondary); }
         .dup-note { color: var(--text-secondary); }
 
+        /* 匯入備份檔視窗 */
+        .backup-source-btns { display: flex; flex-wrap: wrap; gap: 8px; }
+        .backup-source-btns .btn { flex: 1 1 200px; justify-content: center; }
+        #backupList { max-height: 40vh; overflow-y: auto; }
+        .backup-file-meta { color: var(--text-secondary); font-size: 0.8rem; }
+
         /* 資料衝突視窗 */
         .conf-field {
             display: grid;
@@ -978,7 +984,8 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.3.3';
+        const APP_VERSION = 'v6.3.4';
+        const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1154,11 +1161,12 @@
                 </button>
                 <div class="sidebar-section-title">備份檔</div>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="exportFileBtn">
-                    💾 匯出備份檔
+                    💾 匯出備份檔…
                 </button>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center;" id="importFileBtn">
-                    📂 匯入備份檔（合併）
+                    📂 匯入備份檔（合併）…
                 </button>
+                <div class="sync-help" style="margin: 8px 0 0; font-size: 0.75rem;">匯出、匯入前都會先詢問要使用哪個資料夾，不會自動下載。</div>
                 <input type="file" id="importFileInput" accept=".json,application/json" style="display: none;">
             </div>
         </aside>
@@ -1528,6 +1536,31 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeModal('dedupeModal')">取消</button>
                 <button type="button" class="btn btn-primary" id="dedupeConfirmBtn">刪除勾選的</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 匯入備份檔：先選來源（資料夾或單一檔案），選了資料夾再列出裡面的備份檔 -->
+    <div class="modal" id="backupImportModal">
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">📂 匯入備份檔</div>
+            <div class="sync-help">
+                請先選擇備份放在哪裡，不會自動載入任何檔案。載入是與目前資料「合併」，不會清空現有任務。
+            </div>
+            <div class="backup-source-btns">
+                <button type="button" class="btn btn-primary" id="backupPickFolderBtn">📁 選擇備份資料夾…</button>
+                <button type="button" class="btn btn-secondary" id="backupPickFileBtn">📄 直接選擇單一備份檔…</button>
+            </div>
+            <div class="sync-help" style="margin: 8px 0 0;">
+                Chrome／Edge 不允許直接選「文件」「下載」「桌面」這幾個資料夾本身；備份放在那裡時，請用「直接選擇單一備份檔」。
+            </div>
+            <div id="backupListBox" style="display: none;">
+                <div class="sync-help" id="backupListSummary" style="margin: 16px 0 8px;"></div>
+                <div id="backupList"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('backupImportModal')">取消</button>
+                <button type="button" class="btn btn-primary" id="backupLoadBtn" disabled>載入選取的備份</button>
             </div>
         </div>
     </div>
@@ -4476,10 +4509,31 @@
 
             // ===== 備份檔（匯出／匯入 JSON；桌面與手機通用）=====
             // 雲端同步是主要途徑；備份檔是離線保底，也能匯入 v6.2 以前的 todomaster-backup-*.json。
+            // v6.3.4 起匯出／匯入前一律先詢問資料夾，不會自動下載：
+            //   有 showDirectoryPicker 的瀏覽器（桌面 Chrome／Edge）→ 每次都跳資料夾選取視窗（不記住上次的授權）；
+            //   其他（手機、Firefox、Safari）→ 匯出先 confirm() 說明再下載到瀏覽器預設位置；匯入直接開系統檔案選擇器。
 
-            exportBackupFile() {
+            async exportBackupFile() {
+                const canPickFolder = typeof window.showDirectoryPicker === 'function';
+                if (!canPickFolder && !confirm(
+                    '這個瀏覽器無法讓 App 指定資料夾。\n\n' +
+                    '備份檔會下載到瀏覽器的預設下載位置；若瀏覽器設定了「下載前詢問儲存位置」，下載時會再讓你選。\n\n' +
+                    '要繼續下載嗎？')) {
+                    this.showNotification('已取消，沒有匯出');
+                    return;
+                }
+                let dir = null;
+                if (canPickFolder) {
+                    try {
+                        dir = await window.showDirectoryPicker({ id: BACKUP_PICKER_ID, mode: 'readwrite' });
+                    } catch (e) {
+                        this.showNotification(e && e.name === 'AbortError' ? '已取消，沒有匯出' : '❌ 無法開啟資料夾：' + (e && e.message));
+                        return;
+                    }
+                }
+                // 選完資料夾才取資料：選取視窗開著的期間若有同步進來的變更，備份也會包含
                 const s = this._exportState();
-                const data = {
+                const text = JSON.stringify({
                     schema: SYNC_SCHEMA,
                     version: APP_VERSION,
                     syncDate: new Date().toISOString(),
@@ -4487,17 +4541,94 @@
                     tags: s.tags,
                     overdueLossLog: s.overdueLossLog,
                     deletedTasks: s.deletedTasks
+                }, null, 2);
+                const fileName = `todomaster-backup-${localDateTimeStr()}.json`;
+                if (!dir) {
+                    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = fileName;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                    this.showNotification('✅ 備份檔已下載到瀏覽器的預設下載位置');
+                    return;
+                }
+                try {
+                    const writable = await (await dir.getFileHandle(fileName, { create: true })).createWritable();
+                    try {
+                        await writable.write(text);
+                        await writable.close();
+                    } catch (e) {
+                        await writable.abort().catch(() => {});
+                        throw e;
+                    }
+                    this.showNotification(`✅ 已備份到「${dir.name}」：${fileName}`);
+                } catch (e) {
+                    console.error('[Backup] 匯出失敗:', e);
+                    this.showNotification('❌ 匯出失敗：' + (e && e.message));
+                }
+            }
+
+            // 匯入入口：能選資料夾的瀏覽器先跳視窗讓使用者選來源；否則直接開系統檔案選擇器（本身就會問要從哪個位置選）
+            openBackupImport() {
+                if (typeof window.showDirectoryPicker !== 'function') {
+                    document.getElementById('importFileInput').click();
+                    return;
+                }
+                this._backupFiles = [];
+                document.getElementById('backupListBox').style.display = 'none';
+                document.getElementById('backupLoadBtn').disabled = true;
+                this.openModal('backupImportModal');
+            }
+
+            // 選資料夾 → 列出裡面的 .json（新到舊），供選一個載入
+            async pickBackupFolder() {
+                let dir;
+                try {
+                    dir = await window.showDirectoryPicker({ id: BACKUP_PICKER_ID, mode: 'read' });
+                } catch (e) {
+                    if (!e || e.name !== 'AbortError') this.showNotification('❌ 無法開啟資料夾：' + (e && e.message));
+                    return;
+                }
+                try {
+                    const files = [];
+                    for await (const [name, handle] of dir.entries()) {
+                        if (handle.kind !== 'file' || !/\.json$/i.test(name)) continue;
+                        try { files.push(await handle.getFile()); } catch (_) { /* 列舉途中檔案被移除：略過 */ }
+                    }
+                    files.sort((a, b) => b.lastModified - a.lastModified || a.name.localeCompare(b.name));
+                    this._renderBackupList(dir.name, files);
+                } catch (e) {
+                    console.error('[Backup] 讀取資料夾失敗:', e);
+                    this.showNotification('❌ 讀取資料夾失敗：' + (e && e.message));
+                }
+            }
+
+            _renderBackupList(folderName, files) {
+                const esc = s => this.escapeHtml(String(s));
+                const when = ms => {
+                    const d = new Date(ms);
+                    return `${localDateStr(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
                 };
-                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `todomaster-backup-${localDateTimeStr()}.json`;
-                document.body.appendChild(link);
-                link.click();
-                document.body.removeChild(link);
-                setTimeout(() => URL.revokeObjectURL(url), 1000);
-                this.showNotification('✅ 備份檔已匯出');
+                this._backupFiles = files;
+                document.getElementById('backupListSummary').textContent = files.length
+                    ? `資料夾「${folderName}」裡有 ${files.length} 個 .json 檔（新到舊），選一個載入：`
+                    : `資料夾「${folderName}」裡沒有 .json 備份檔，請重新選擇資料夾。`;
+                document.getElementById('backupList').innerHTML = files.map((f, i) =>
+                    `<label class="conf-opt"><input type="radio" name="backupFile" value="${i}"${i === 0 ? ' checked' : ''}>` +
+                    `<div><b>${esc(f.name)}</b><br><span class="backup-file-meta">${when(f.lastModified)} · ${Math.max(1, Math.round(f.size / 1024))} KB</span></div></label>`).join('');
+                document.getElementById('backupLoadBtn').disabled = files.length === 0;
+                document.getElementById('backupListBox').style.display = '';
+            }
+
+            async loadSelectedBackup() {
+                const picked = document.querySelector('input[name="backupFile"]:checked');
+                const file = picked && this._backupFiles && this._backupFiles[Number(picked.value)];
+                if (!file) return;
+                closeModal('backupImportModal');
+                await this.importBackupFile(file);
             }
 
             // 匯入＝與目前資料「合併」（同一任務取較新者、不會清空現有資料）；套用前先留一份本機快照
@@ -4778,11 +4909,16 @@
                 });
 
                 $('exportFileBtn').addEventListener('click', () => this.exportBackupFile());
-                $('importFileBtn').addEventListener('click', () => $('importFileInput').click());
+                $('importFileBtn').addEventListener('click', () => this.openBackupImport());
+                $('backupPickFolderBtn').addEventListener('click', () => this.pickBackupFolder());
+                $('backupPickFileBtn').addEventListener('click', () => $('importFileInput').click());
+                $('backupLoadBtn').addEventListener('click', () => this.loadSelectedBackup());
                 $('importFileInput').addEventListener('change', async e => {
                     const file = e.target.files && e.target.files[0];
                     e.target.value = '';
-                    if (file) await this.importBackupFile(file);
+                    if (!file) return;
+                    closeModal('backupImportModal');
+                    await this.importBackupFile(file);
                 });
             }
 
