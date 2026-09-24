@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.3.2 - 任務管理工具</title>
+    <title>TodoMaster v6.3.3 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -908,6 +908,38 @@
         .dup-tag { color: var(--accent-secondary); }
         .dup-note { color: var(--text-secondary); }
 
+        /* 資料衝突視窗 */
+        .conf-field {
+            display: grid;
+            grid-template-columns: 5.5em 1fr 1fr;
+            gap: 4px 10px;
+            align-items: start;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            padding: 3px 0;
+        }
+        .conf-label { color: var(--text-secondary); }
+        .conf-side { word-break: break-word; }
+        .conf-side b { color: var(--accent-primary); font-weight: 600; margin-right: 4px; }
+        .conf-side.remote b { color: var(--category-review); }
+        .conf-kind { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 4px; }
+        .conf-opt {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            padding: 8px 10px;
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            line-height: 1.5;
+        }
+        .conf-opt input { margin-top: 5px; accent-color: var(--accent-primary); flex-shrink: 0; cursor: pointer; }
+        .conf-opt:has(input:checked) { border-color: var(--accent-primary); background: rgba(74, 158, 255, 0.08); }
+        @media (max-width: 480px) {
+            .conf-field { grid-template-columns: 1fr; padding: 6px 0; }
+        }
+
         .notification {
             position: fixed;
             bottom: 20px;
@@ -946,7 +978,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.3.2';
+        const APP_VERSION = 'v6.3.3';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1500,6 +1532,24 @@
         </div>
     </div>
 
+    <!-- 資料衝突模態框（雲端同步／匯入備份檔共用） -->
+    <div class="modal" id="conflictModal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header" id="conflictTitle">資料有衝突</div>
+            <div class="sync-help" id="conflictSummary"></div>
+            <div id="conflictList"></div>
+            <div style="font-weight: 600; margin: 14px 0 8px;">要怎麼處理這些衝突？</div>
+            <div id="conflictOptions"></div>
+            <div class="sync-help" style="margin: 8px 0 0;">
+                沒有衝突的修改（例如兩台改的是不同任務）已自動合併，不受這個選擇影響。套用前會先備份本機資料。
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="conflictLaterBtn">稍後再說</button>
+                <button type="button" class="btn btn-primary" id="conflictApplyBtn">套用</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 完成時間詢問模態框 -->
     <div class="modal" id="completeTimeModal">
         <div class="modal-content" style="max-width: 400px;">
@@ -1688,6 +1738,137 @@
             return n;
         }
 
+        // ===== 固定 id（迴圈任務的「下一次」）=====
+        // 兩台裝置各自完成同一個迴圈任務時，會算出同一個 id，合併時自然收斂成一份（不再各生一份）。
+        // seriesId＝系列的根任務 id（舊任務沒有此欄位，就以自己的 id 當根）；第 n 次的 id 固定為 `${seriesId}~${n}`。
+        function nextRecurringId(task) {
+            const series = task.seriesId || task.id;
+            const n = ((task.recurring && task.recurring.completedCount) || 0) + 1;
+            return `${series}~${n}`;
+        }
+
+        // ===== 衝突偵測與解決 =====
+        // 任務「內容」比較一律排除 updatedAt / orderAt / order / groupOrder（排序另以 orderAt 決定，不算衝突）。
+        const TASK_META_KEYS = ['id', 'updatedAt', 'orderAt', 'order', 'groupOrder'];
+
+        function isEmptyValue(v) {
+            return v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0);
+        }
+        function isPlainObject(v) {
+            return v !== null && typeof v === 'object' && !Array.isArray(v);
+        }
+
+        // 兩份任務內容有差異的欄位名稱（已排序）
+        function diffTaskFields(a, b) {
+            const A = a || {}, B = b || {};
+            const out = [];
+            for (const k of new Set([...Object.keys(A), ...Object.keys(B)])) {
+                if (TASK_META_KEYS.includes(k)) continue;
+                if (stableStringify(A[k]) !== stableStringify(B[k])) out.push(k);
+            }
+            return out.sort();
+        }
+
+        /**
+         * 找出「兩邊都改過、且改得不一樣」的任務（三向比對，不修改輸入）。
+         * base ＝ 上次同步後雙方一致的狀態 { tasks: { id: task } }；null ＝ 基準未知 → 不偵測（回傳 []）；{ tasks: {} } ＝ 已知為空。
+         * - edit：L、R 都與基準不同，且 L ≠ R
+         * - add：基準沒有、L 與 R 同 id 但內容不同（首次連線兩邊都有資料、或固定 id 的「下一次」兩台算出不同內容）
+         * - remote-deleted / local-deleted：一邊刪除、另一邊相對基準有修改
+         * 不算衝突：兩邊內容相同、沒重疊的修改、只有排序不同、被 purge 清掉的（沒有刪除標記）。
+         */
+        function detectConflicts(local, remote, base) {
+            if (!base || !base.tasks) return [];
+            const lMap = new Map((local.tasks || []).map(t => [t.id, t]));
+            const rMap = new Map((remote.tasks || []).map(t => [t.id, t]));
+            const lDel = local.deletedTasks || {}, rDel = remote.deletedTasks || {};
+            const out = [];
+            // title 用基準（原名）：兩邊若都改了名稱，顯示哪一邊的新名字都會誤導；fields 在「一邊刪除」時是「修改的一邊相對基準改了哪些欄位」
+            const mk = (id, kind, l, r, b) => ({
+                id, kind, title: String(((b || l || r).title) || ''),
+                local: l || null, remote: r || null, base: b || null,
+                fields: (l && r) ? diffTaskFields(l, r) : diffTaskFields(l || r, b)
+            });
+            for (const id of new Set([...lMap.keys(), ...rMap.keys()])) {
+                const l = lMap.get(id), r = rMap.get(id), b = base.tasks[id];
+                if (l && r) {
+                    const lf = taskContentFp(l), rf = taskContentFp(r);
+                    if (lf === rf) continue;
+                    const lCh = !b || lf !== taskContentFp(b);
+                    const rCh = !b || rf !== taskContentFp(b);
+                    if (lCh && rCh) out.push(mk(id, b ? 'edit' : 'add', l, r, b));
+                } else if (l && !r && id in rDel) {
+                    if (b && taskContentFp(l) !== taskContentFp(b)) out.push(mk(id, 'remote-deleted', l, null, b));
+                } else if (r && !l && id in lDel) {
+                    if (b && taskContentFp(r) !== taskContentFp(b)) out.push(mk(id, 'local-deleted', null, r, b));
+                }
+            }
+            out.sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : a.id < b.id ? -1 : 1));
+            return out;
+        }
+
+        // 單一欄位的三向合併（交叉補充）。newerIsLocal：本機任務的 updatedAt 較大（平手視為雲端較新，與 mergeStates 一致）
+        function mergeFieldValue(k, lv, rv, bv, hasBase, newerIsLocal) {
+            const ls = stableStringify(lv), rs = stableStringify(rv);
+            if (ls === rs) return lv;
+            const nv = newerIsLocal ? lv : rv, ov = newerIsLocal ? rv : lv;
+            if (isPlainObject(lv) && isPlainObject(rv)) {          // 例如 recurring：逐子欄位合併
+                const b = isPlainObject(bv) ? bv : null;
+                const out = {};
+                for (const sk of new Set([...Object.keys(lv), ...Object.keys(rv)])) {
+                    const v = mergeFieldValue(sk, lv[sk], rv[sk], b ? b[sk] : undefined, !!b, newerIsLocal);
+                    if (v !== undefined) out[sk] = v;
+                }
+                return out;
+            }
+            if (k === 'tags' && Array.isArray(lv) && Array.isArray(rv)) {   // 標籤：雙方新增的都留；任一方移除的就移除
+                const set = new Set([...nv, ...ov]);
+                if (hasBase && Array.isArray(bv)) for (const t of bv) if (!lv.includes(t) || !rv.includes(t)) set.delete(t);
+                return [...set];
+            }
+            if (hasBase) {
+                const bs = stableStringify(bv);
+                if (ls === bs) return rv;      // 只有雲端改
+                if (rs === bs) return lv;      // 只有本機改
+                return nv;                     // 兩邊都改同一欄位 → 較晚修改者
+            }
+            return isEmptyValue(nv) && !isEmptyValue(ov) ? ov : nv;   // 無基準：較新者為準，空值由另一邊補上
+        }
+
+        // 交叉補充：欄位層級合併兩份任務（b ＝ 基準任務或 null）。不含 updatedAt / 排序欄位（由呼叫端處理）
+        function mergeTaskFields(l, r, b) {
+            const newerIsLocal = (l.updatedAt || 0) > (r.updatedAt || 0);
+            const out = { id: l.id };
+            for (const k of new Set([...Object.keys(l), ...Object.keys(r)])) {
+                if (TASK_META_KEYS.includes(k)) continue;
+                const v = mergeFieldValue(k, l[k], r[k], b ? b[k] : undefined, !!b, newerIsLocal);
+                if (v !== undefined) out[k] = v;
+            }
+            return out;
+        }
+
+        /**
+         * 依使用者選的方式解決單一衝突任務：mode ＝ 'fields'（交叉補充）| 'remote'（以雲端為準）| 'local'（以這台為準）。
+         * 回傳 { task, tombstone }：task 為保留下來的任務（updatedAt 一律蓋成比雙方與刪除標記都新，
+         * 這樣「使用者的決定」才不會在下一輪合併又被較新的一邊蓋回去）；被刪除時 task 為 null、tombstone 為新的刪除時間。
+         * （'newest' 完全取新版＝mergeStates 預設的較晚者為準，不需經過這裡。）
+         */
+        function resolveConflictTask(conf, mode, l, r, now, tombAt) {
+            let task;
+            if (mode === 'remote') task = r ? { ...r } : null;
+            else if (mode === 'local') task = l ? { ...l } : null;
+            else task = (l && r) ? mergeTaskFields(l, r, conf.base) : { ...(l || r) };   // 一邊刪除、一邊修改 → 保留被修改的
+            const top = Math.max(now, tombAt || 0, (l && l.updatedAt) || 0, (r && r.updatedAt) || 0);
+            if (!task) return { task: null, tombstone: top + 1 };
+            task.id = (l || r).id;
+            task.updatedAt = top + 1;
+            const oWin = (l && r) ? ((l.orderAt || 0) > (r.orderAt || 0) ? l : r) : (l || r);   // 排序仍依 orderAt
+            for (const k of ['order', 'groupOrder', 'orderAt']) {
+                if (oWin[k] === undefined) delete task[k]; else task[k] = oWin[k];
+            }
+            return { task, tombstone: null };
+        }
+
         /**
          * 合併兩份狀態（純函式，不修改輸入）。
          * - 任務：以 id 聯集；同 id 取 updatedAt 較新者（平手取 remote＝先上傳者）；
@@ -1696,6 +1877,8 @@
          * - 標籤：聯集（App 只會新增標籤）。
          * - 逾期損失紀錄：同內容取兩邊出現次數的最大值（保留合法重複、去除跨裝置重複）。
          * - opts.purgeCutoff：套用「完成超過 30 天清除」規則，避免合併把已清除的舊資料帶回來。
+         * - opts.resolve：{ mode, byId } —— 使用者對「衝突任務」的處理方式（只影響 byId 內的任務，其餘照常合併）。
+         *   mode 為 'newest'（完全取新版）時等同預設的較晚者為準，其餘見 resolveConflictTask()。未提供時行為與 v6.3.2 完全相同。
          */
         function mergeStates(local, remote, opts = {}) {
             const now = opts.now ?? Date.now();
@@ -1718,8 +1901,16 @@
             const rMap = new Map(R.tasks.map(t => [t.id, t]));
             const ids = [...lMap.keys(), ...[...rMap.keys()].filter(id => !lMap.has(id))];
             let tasks = [];
+            const rs = opts.resolve && opts.resolve.mode !== 'newest' ? opts.resolve : null;
             for (const id of ids) {
                 const l = lMap.get(id), r = rMap.get(id);
+                const conf = rs && rs.byId && rs.byId[id];
+                if (conf) {
+                    const res = resolveConflictTask(conf, rs.mode, l, r, now, deleted[id]);
+                    if (res.task) { delete deleted[id]; tasks.push(res.task); }
+                    else deleted[id] = res.tombstone;
+                    continue;
+                }
                 let out = l || r;
                 if (l && r) {
                     const win = (l.updatedAt || 0) > (r.updatedAt || 0) ? l : r;   // 平手取遠端
@@ -1982,6 +2173,8 @@
         // ===== 同步引擎：狀態、觸發時機、設定 =====
         const SYNC_CFG_KEY = 'todoSyncConfig';
         const SYNC_META_KEY = 'todoSyncMeta';
+        const SYNC_BASE_KEY = 'todoSyncBase';   // 基準快照：上次同步後雙方一致的任務內容，用來做三向比對（偵測「兩邊都改過」的衝突）
+        const CONFLICT_MODE_LABELS = { fields: '交叉補充', newest: '完全取新版', remote: '以雲端為準', local: '以本機為準' };
 
         function lsReadJson(key, fallback) {
             try {
@@ -1997,9 +2190,19 @@
                 this.app = app;
                 this.cfg = lsReadJson(SYNC_CFG_KEY, null);   // { owner, repo, token }
                 this.meta = Object.assign(CloudSync.defaultMeta(), lsReadJson(SYNC_META_KEY, {}));
-                this.state = 'idle';                         // idle | syncing | offline | auth | error
+                this.state = 'idle';                         // idle | syncing | conflict | offline | auth | error
                 this.message = '';
                 this.lastApplied = 0;                        // 最近一次同步從遠端套用了幾筆任務變更
+                this.lastResolved = 0;                       // 最近一次依使用者選擇處理了幾個衝突
+                const base = lsReadJson(SYNC_BASE_KEY, null);
+                this.base = base && base.tasks ? base : null;   // { tasks: { id: task } }；null ＝ 基準未知
+                this._baseJson = null;
+                try { this._baseJson = localStorage.getItem(SYNC_BASE_KEY); } catch (_) { /* ignore */ }
+                this._conflict = null;                       // { conflicts }：等待使用者決定的衝突
+                this._decision = null;                       // 使用者選的處理方式（只在 resolveConflict 進行中有值）
+                this._promptOpen = false;                    // 衝突視窗開著
+                this._promptPending = false;                 // 頁面在背景，等回到前景再彈出
+                this._snoozeUntil = 0;                       // 「稍後再說」：這個時間之前自動觸發不再處理
                 this._running = null;
                 this._again = false;
                 this._pushTimer = null;
@@ -2052,6 +2255,9 @@
                 } else if (this.state === 'syncing') {
                     cls = 'busy';
                     text = '🔄 同步中…';
+                } else if (this.state === 'conflict') {
+                    cls = 'warn';
+                    text = '⚠️ ' + this.message + (this._promptOpen || this._promptPending ? '' : '（已暫緩，按「立即同步」重新處理）');
                 } else if (this.state === 'offline') {
                     cls = 'warn';
                     text = '⚠️ 離線，恢復連線後自動同步' + (this.meta.dirty ? '（有待上傳變更）' : '');
@@ -2096,8 +2302,10 @@
                 this._bound = true;
                 document.addEventListener('visibilitychange', () => {
                     if (!this.configured) return;
-                    if (document.visibilityState === 'visible') this.syncNow('visible');
-                    else if (this.meta.dirty) this.syncNow('hidden');   // 切到背景前，盡量先把變更推上去
+                    if (document.visibilityState === 'visible') {
+                        if (this._promptPending) this._promptConflict();   // 頁面在背景時偵測到的衝突，回到前景才詢問
+                        this.syncNow('visible');
+                    } else if (this.meta.dirty) this.syncNow('hidden');   // 切到背景前，盡量先把變更推上去
                 });
                 window.addEventListener('online', () => { if (this.configured) this.syncNow('online'); });
                 window.addEventListener('offline', () => { if (this.configured) this._setState('offline'); });
@@ -2117,9 +2325,11 @@
 
             async syncNow(reason = 'manual') {
                 if (!this.configured) return;
-                const manual = reason === 'manual' || reason === 'setup';
+                const manual = reason === 'manual' || reason === 'setup' || reason === 'resolve';
                 // Token 已失效時不自動重試（避免用無效 Token 反覆打 API），由使用者手動或重新設定後再試
                 if (!manual && this.state === 'auth') return;
+                // 有衝突在等使用者決定：視窗開著、等回到前景、或按了「稍後再說」的期間內，自動觸發一律不動作（手動同步才會重新詢問）
+                if (!manual && this.state === 'conflict' && (this._promptOpen || this._promptPending || Date.now() < this._snoozeUntil)) return;
                 // 回前景/聚焦/輪詢在短時間內只需要一次
                 if ((reason === 'visible' || reason === 'focus' || reason === 'poll') && Date.now() - this._lastStart < 10000) return;
                 if (this._running) {
@@ -2185,6 +2395,7 @@
                 const transport = new GitHubTransport(this.cfg);
                 this._setState('syncing');
                 this.lastApplied = 0;
+                this.lastResolved = 0;
 
                 for (let attempt = 0; attempt < 5; attempt++) {
                     // 有待上傳變更時一律完整拉取；沒有變更才用 ETag 條件式請求（304 不計 rate limit）
@@ -2210,7 +2421,22 @@
 
                     const opts = { now: this.now(), purgeCutoff: app._purgeCutoffStr() };
                     const local = app._exportState();
-                    const merged = mergeStates(local, remote || { tasks: [], tags: [], overdueLossLog: [], deletedTasks: {} }, opts);
+
+                    // 衝突偵測：同一個任務「兩邊都改過、且改得不一樣」→ 先問使用者怎麼處理（沒重疊的修改照常自動合併，不會問）
+                    let resolve = null;
+                    if (remote) {
+                        const conflicts = detectConflicts(local, remote, this._baseForDetect(local));
+                        if (conflicts.length) {
+                            if (!this._decision) {
+                                this._enterConflict(conflicts);   // 本輪到此為止：不推送、不套用，等使用者選擇
+                                return;
+                            }
+                            resolve = { mode: this._decision, byId: Object.fromEntries(conflicts.map(c => [c.id, c])) };
+                            this.lastResolved = conflicts.length;
+                        }
+                    }
+
+                    const merged = mergeStates(local, remote || { tasks: [], tags: [], overdueLossLog: [], deletedTasks: {} }, resolve ? { ...opts, resolve } : opts);
                     const mergedDigest = stateDigest(merged);
 
                     let sha = pulled.sha || null;
@@ -2251,11 +2477,81 @@
                     this.meta.dirty = finalDigest !== mergedDigest;   // 往返期間又有新變更 → 仍待上傳
                     this.meta.lastSyncedAt = Date.now();
                     this._saveMeta();
+                    this._saveBase(merged);                            // 下一輪偵測衝突的「基準」＝這次雙方一致的內容
+                    this._conflict = null;
                     if (this.meta.dirty) this.schedulePush(1500);
                     this._setState('idle');
-                    if (this.lastApplied > 0) app.showNotification(`☁️ 已同步 ${this.lastApplied} 項變更`);
+                    if (this.lastResolved > 0) app.showNotification(`☁️ 已依「${CONFLICT_MODE_LABELS[resolve.mode]}」處理 ${this.lastResolved} 個衝突並同步`);
+                    else if (this.lastApplied > 0) app.showNotification(`☁️ 已同步 ${this.lastApplied} 項變更`);
                     return;
                 }
+            }
+
+            // ----- 衝突處理 -----
+
+            // 偵測用的基準：有快照就用；沒有快照但本機沒有待上傳變更 → 本機就是上次同步的內容；否則基準未知（升級後第一次且有待上傳變更）→ 本輪不偵測
+            _baseForDetect(local) {
+                if (this.base && this.base.tasks) return this.base;
+                if (!this.meta.dirty) {
+                    const tasks = {};
+                    for (const t of local.tasks) tasks[t.id] = t;
+                    return { tasks };
+                }
+                return null;
+            }
+
+            // 必須深拷貝（JSON 往返）：state.tasks 的物件之後會被使用者編輯就地修改，基準若共用參照就會跟著漂移
+            _saveBase(state) {
+                const tasks = {};
+                for (const t of state.tasks) tasks[t.id] = t;
+                const json = JSON.stringify({ v: 1, tasks });
+                if (json === this._baseJson && this.base) return;
+                this.base = JSON.parse(json);
+                this._baseJson = json;
+                try { localStorage.setItem(SYNC_BASE_KEY, json); } catch (_) { /* 空間不足時只留在記憶體 */ }
+            }
+
+            _enterConflict(conflicts) {
+                this._conflict = { conflicts };
+                this._setState('conflict', `${conflicts.length} 個任務衝突，等待你的選擇`);
+                this._promptConflict();
+            }
+
+            _promptConflict() {
+                if (!this._conflict) return;
+                if (document.visibilityState !== 'visible') {
+                    this._promptPending = true;       // 頁面在背景：回到前景再問，避免使用者看不到視窗
+                    this.renderStatus();
+                    return;
+                }
+                this._promptPending = false;
+                this._promptOpen = true;
+                this.renderStatus();
+                this.app.openConflictModal(this._conflict.conflicts, {
+                    title: '兩台裝置的資料有衝突',
+                    labels: { local: '本機', remote: '雲端' },
+                    onApply: mode => this.resolveConflict(mode),
+                    onLater: () => this.postponeConflict()
+                });
+            }
+
+            // 使用者選好處理方式 → 重新拉取最新雲端資料、重新偵測，並以所選方式處理（決定只在這一輪有效，不會殘留）
+            async resolveConflict(mode) {
+                this._promptOpen = false;
+                this._promptPending = false;
+                this._decision = mode;
+                try {
+                    await this.syncNow('resolve');
+                } finally {
+                    this._decision = null;
+                }
+            }
+
+            postponeConflict() {
+                this._promptOpen = false;
+                this._promptPending = false;
+                this._snoozeUntil = Date.now() + 10 * 60000;
+                this.renderStatus();
             }
 
             // ----- 設定 -----
@@ -2273,6 +2569,12 @@
                 if (!sameRepo) {
                     // 新的 repo：本機資料全部視為待上傳；完整拉取（不用 ETag）
                     this.meta = Object.assign(CloudSync.defaultMeta(), { dirty: true, clockOffset: this.meta.clockOffset || 0 });
+                    // 基準「已知為空」：首次連線時若兩邊都有同一個任務而內容不同，會被視為衝突而詢問（立即存檔，重新載入也不會變成「未知」）
+                    this._baseJson = JSON.stringify({ v: 1, tasks: {} });
+                    this.base = { tasks: {} };
+                    try { localStorage.setItem(SYNC_BASE_KEY, this._baseJson); } catch (_) { /* ignore */ }
+                    this._conflict = null;
+                    this._snoozeUntil = 0;
                 }
                 this._saveMeta();
                 this._setState('idle');
@@ -2285,9 +2587,17 @@
                 clearTimeout(this._pushTimer);
                 this.cfg = null;
                 this.meta = CloudSync.defaultMeta();
+                this.base = null;
+                this._baseJson = null;
+                this._conflict = null;
+                this._decision = null;
+                this._promptOpen = false;
+                this._promptPending = false;
+                this._snoozeUntil = 0;
                 try {
                     localStorage.removeItem(SYNC_CFG_KEY);
                     localStorage.removeItem(SYNC_META_KEY);
+                    localStorage.removeItem(SYNC_BASE_KEY);
                 } catch (_) { /* ignore */ }
                 this._setState('idle');
             }
@@ -3896,6 +4206,15 @@
                     return;
                 }
 
+                // 固定 id：兩台裝置各自完成同一個任務會算出「同一個」id，合併時自然收斂成一份（不再各生一份）；
+                // 已存在（另一台已建立、或取消完成後又完成一次）就不重複建立，也不動群組順序
+                const nextId = nextRecurringId(completedTask);
+                if (this.tasks.some(t => t.id === nextId)) {
+                    this.updateTask(completedTask.id, { recurringCreated: true });
+                    this.showNotification('🔁 下一次任務已存在，不重複建立');
+                    return;
+                }
+
                 // 計算新的 groupOrder（放在群組末尾）
                 // 先重新編號現有活躍任務為連續的 1..N，避免順序數字隨完成次數無限增加
                 let newGroupOrder = null;
@@ -3905,6 +4224,8 @@
                 }
 
                 const newTask = {
+                    id: nextId,
+                    seriesId: completedTask.seriesId || completedTask.id,
                     title: completedTask.title,
                     description: completedTask.description,
                     date: nextDate,
@@ -4183,26 +4504,127 @@
             async importBackupFile(file) {
                 try {
                     const incoming = normalizeState(JSON.parse(await file.text()));
-                    const local = this._exportState();
-                    const merged = mergeStates(local, incoming, {
-                        now: this.cloud ? this.cloud.now() : Date.now(),
-                        purgeCutoff: this._purgeCutoffStr()
+                    const finish = resolve => {
+                        const local = this._exportState();
+                        const merged = mergeStates(local, incoming, {
+                            now: this.cloud ? this.cloud.now() : Date.now(),
+                            purgeCutoff: this._purgeCutoffStr(),
+                            ...(resolve ? { resolve } : {})
+                        });
+                        const n = countStateChanges(local, merged);
+                        this._savePreSyncBackup(local);
+                        this._applyState(merged);
+                        if (this.cloud) this.cloud.markDirty();
+                        this.showNotification(`✅ 已匯入並合併備份檔（新增/更新 ${n} 筆任務）`);
+                    };
+                    // 備份檔沒有同步歷史（基準未知）：同一個任務兩邊內容不同，就先問使用者要怎麼處理
+                    const conflicts = detectConflicts(this._exportState(), incoming, { tasks: {} });
+                    if (conflicts.length === 0) {
+                        finish(null);
+                        return;
+                    }
+                    this.openConflictModal(conflicts, {
+                        title: '備份檔與目前資料有衝突',
+                        labels: { local: '目前資料', remote: '備份檔' },
+                        onApply: mode => {
+                            try {
+                                finish({ mode, byId: Object.fromEntries(conflicts.map(c => [c.id, c])) });
+                            } catch (err) {
+                                console.error('[Backup] 匯入失敗:', err);
+                                this.showNotification('❌ 匯入失敗：' + err.message);
+                            }
+                        },
+                        onLater: () => this.showNotification('已取消匯入，資料未變動')
                     });
-                    const n = countStateChanges(local, merged);
-                    this._savePreSyncBackup(local);
-                    this._applyState(merged);
-                    if (this.cloud) this.cloud.markDirty();
-                    this.showNotification(`✅ 已匯入並合併備份檔（新增/更新 ${n} 筆任務）`);
                 } catch (e) {
                     console.error('[Backup] 匯入失敗:', e);
                     this.showNotification('❌ 匯入失敗：' + (e instanceof SyncError ? e.message : '檔案不是有效的 TodoMaster 備份'));
                 }
             }
 
+            // ===== 資料衝突視窗（雲端同步、匯入備份檔共用）=====
+            // conflicts：detectConflicts() 的結果；opts：{ title, labels:{local,remote}, onApply(mode), onLater() }。
+            // 只列出衝突的任務與逐欄位差異；處理方式是全域選一種，套用到所有衝突任務。
+            openConflictModal(conflicts, opts) {
+                const esc = s => this.escapeHtml(String(s));
+                const L = opts.labels.local, R = opts.labels.remote;
+                const FIELD_LABELS = {
+                    title: '名稱', description: '備註', date: '日期', time: '時刻', category: '分類', taskType: '任務類型',
+                    estimatedTime: '預計時間', blocks: 'Block 數', completedBlocks: '已完成 Block', blockTimes: 'Block 用時',
+                    tags: '標籤', completed: '完成狀態', completedAt: '完成時間', completedDate: '完成日期', actualTime: '實際用時',
+                    timeBalance: '時間收支', nextStepNotes: '下一步', pinned: '釘選', recurring: '迴圈設定',
+                    recurringCreated: '已建立下一次', groupId: '群組', groupName: '群組名稱', groupCycleMode: '群組週期',
+                    groupDelayMode: '群組順延', seriesId: '系列'
+                };
+                const fmt = (k, v) => {
+                    if (v === undefined || v === null || v === '') return '（空）';
+                    if (typeof v === 'boolean') return k === 'completed' ? (v ? '已完成' : '未完成') : (v ? '是' : '否');
+                    if (Array.isArray(v)) return v.length ? v.join('、') : '（空）';
+                    if (typeof v === 'object') {
+                        if (k === 'recurring') return v.enabled ? `每 ${v.interval} 天，已完成 ${v.completedCount || 0} 次${v.repeatCount ? `／共 ${v.repeatCount} 次` : ''}` : '關閉';
+                        return JSON.stringify(v);
+                    }
+                    const s = String(v);
+                    return s.length > 40 ? s.slice(0, 40) + '…' : s;
+                };
+                const KIND_TEXT = {
+                    edit: '兩邊都修改過，內容不同',
+                    add: '兩邊各自有這個任務，內容不同',
+                    'remote-deleted': `${R}已刪除，但${L}又修改過`,
+                    'local-deleted': `${L}已刪除，但${R}又修改過`
+                };
+                const MAX_TASKS = 8, MAX_FIELDS = 6;
+                const shown = conflicts.slice(0, MAX_TASKS);
+                const rows = shown.map(c => {
+                    // 一邊已刪除：那一邊顯示「（已刪除）」，另一邊顯示它修改過的欄位
+                    const val = (c, side, k) => (c.kind === 'remote-deleted' && side === 'remote') || (c.kind === 'local-deleted' && side === 'local')
+                        ? '（已刪除）' : fmt(k, c[side] && c[side][k]);
+                    const fields = c.fields.slice(0, MAX_FIELDS).map(k =>
+                        `<div class="conf-field"><span class="conf-label">${esc(FIELD_LABELS[k] || k)}</span>` +
+                        `<span class="conf-side"><b>${esc(L)}</b>${esc(val(c, 'local', k))}</span>` +
+                        `<span class="conf-side remote"><b>${esc(R)}</b>${esc(val(c, 'remote', k))}</span></div>`
+                    ).join('');
+                    const more = c.fields.length > MAX_FIELDS ? `<div class="conf-kind">…另有 ${c.fields.length - MAX_FIELDS} 個欄位不同</div>` : '';
+                    return `<div class="dup-group"><div class="dup-title">📝 ${esc(c.title || '（無標題）')}</div>` +
+                        `<div class="conf-kind">${esc(KIND_TEXT[c.kind] || '')}</div>${fields}${more}</div>`;
+                }).join('');
+                const hidden = conflicts.length > MAX_TASKS ? `<div class="sync-help">…另有 ${conflicts.length - MAX_TASKS} 個衝突任務未列出，處理方式會一併套用。</div>` : '';
+                document.getElementById('conflictTitle').textContent = '⚠️ ' + opts.title;
+                document.getElementById('conflictSummary').textContent =
+                    `有 ${conflicts.length} 個任務在「${L}」和「${R}」兩邊都被修改過、內容不一樣，程式無法自己判斷該留哪一份。請看下面的差異，選一種處理方式。`;
+                document.getElementById('conflictList').innerHTML = rows + hidden;
+                const OPTIONS = [
+                    ['fields', '🔀 交叉補充（推薦）', '兩邊的修改都盡量保留：各改不同欄位就全部留下；同一欄位兩邊都改時取較晚修改者；一邊刪除、一邊修改時保留任務。'],
+                    ['newest', '🆕 完全取新版', '每個衝突任務整筆用「最後修改」的那一份，較舊的整份丟棄。'],
+                    ['remote', `☁️ 以${R}為準`, `衝突任務全部用${R}的版本（${L}在這些任務上的修改會丟掉）。`],
+                    ['local', `💻 以${L}為準`, `衝突任務全部用${L}的版本（${R}在這些任務上的內容會被覆蓋）。`]
+                ];
+                document.getElementById('conflictOptions').innerHTML = OPTIONS.map(([v, label, desc], i) =>
+                    `<label class="conf-opt"><input type="radio" name="conflictMode" value="${v}"${i === 0 ? ' checked' : ''}>` +
+                    `<div><b>${esc(label)}</b><br><span class="dup-note">${esc(desc)}</span></div></label>`).join('');
+                const modal = document.getElementById('conflictModal');
+                let done = false;
+                const finish = fn => {
+                    if (done) return;
+                    done = true;
+                    modal.onclick = null;
+                    closeModal('conflictModal');
+                    fn();
+                };
+                document.getElementById('conflictApplyBtn').onclick = () => {
+                    const mode = document.querySelector('input[name="conflictMode"]:checked').value;
+                    finish(() => opts.onApply(mode));
+                };
+                document.getElementById('conflictLaterBtn').onclick = () => finish(() => opts.onLater());
+                modal.onclick = e => { if (e.target === modal) finish(() => opts.onLater()); };   // 點視窗外＝稍後再說
+                this.openModal('conflictModal');
+            }
+
             // ===== 整理重複任務 =====
             // 先做一次雲端同步（讓這台看到的是各裝置合併後的完整資料），再列出重複的任務供勾選刪除。
             async openDedupeModal() {
                 if (this.cloud && this.cloud.configured) await this.cloud.syncNow('manual');
+                if (this.cloud && this.cloud.state === 'conflict') return;   // 有衝突尚未處理：資料還沒合併完成，先處理衝突再整理重複
                 const groups = findDuplicateGroups(this.tasks, localDateStr());
                 if (groups.length === 0) {
                     this.showNotification('✅ 沒有找到重複的任務');
@@ -4301,8 +4723,8 @@
                     }
                     await cloud.syncNow('manual');
                     if (cloud.state === 'idle') {
-                        if (cloud.lastApplied === 0) this.showNotification('✅ 已是最新');
-                    } else {
+                        if (cloud.lastApplied === 0 && cloud.lastResolved === 0) this.showNotification('✅ 已是最新');
+                    } else if (cloud.state !== 'conflict') {   // 有衝突時會直接跳出處理視窗，不另外提示
                         this.showNotification('⚠️ ' + (cloud.message || (cloud.state === 'offline' ? '目前離線，恢復連線後自動同步' : '同步未完成')));
                     }
                 });
@@ -4662,6 +5084,7 @@
                     completedAt: null,
                     order: this.tasks.length
                 };
+                delete newTask.seriesId;   // 副本是新系列：否則與原任務共用 seriesId，兩邊「下一次」的固定 id 會互撞
 
                 this.tasks.push(newTask);
                 this.saveToStorage();
