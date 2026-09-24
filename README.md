@@ -5,7 +5,7 @@
 此資料夾用於 **Claude Code 維護和開發 TodoMaster 應用**。
 
 **主應用**：`TodoMaster.html`  
-**版本**：6.3 (2026-09-24)  
+**版本**：6.3.1 (2026-09-24)  
 **狀態**：✅ 穩定版本  
 **責任方**：Claude Code
 
@@ -111,7 +111,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 開啟 `TodoMaster.html` → 側邊欄「☁️ 雲端同步 → ⚙️ 雲端同步設定」→ 填入帳號、`todomaster-data`、貼上 Token → **測試並儲存**。連線成功後本機資料會自動上傳。
 
 ### 步驟 D：其他裝置（例如 Android）
-- 先確認 v6.3 已部署到 GitHub Pages（`git push origin master`），手機完全關閉 PWA 後重開（Service Worker 為 cache-first，可能需重開兩次才換新版）
+- 先確認最新版已部署到 GitHub Pages（`git push origin master`）。v6.3.1 起 HTML 為網路優先，手機開啟 App 會自動換上新版；若仍是舊畫面，見下方 FAQ「手機顯示舊版」
 - 在第一台裝置的「雲端同步設定」底部按 **📋 複製連結**，用你自己的管道傳到手機（如 LINE 記事本/Keep），在手機開啟連結 → 確認對話框 → 自動設定並同步。**用完請刪除該則訊息**（連結含 Token）
 - 也可以在手機的設定畫面手動貼上 Token
 
@@ -127,6 +127,22 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 ---
 
 ## 版本歷史
+
+### v6.3.1 (2026-09-24) - 修復手機 PWA 卡在舊版（Service Worker 快取汙染）
+- 🐛 **症狀**：手機（GitHub Pages）一度顯示 v6.3，之後又變回 v6.2.1 並一直停在舊版；線上實際已是 v6.3（多個 CDN 節點、`ETag`、`sw.js` 皆一致），問題出在手機端
+- 🔍 **根因**（已在 Chromium 以模擬 Pages 標頭重現）：GitHub Pages 對所有檔案送 `Cache-Control: max-age=600`，而舊 `sw.js` 用 `cache.addAll()` 安裝——它預設會走瀏覽器 HTTP 快取。在舊版被瀏覽器快取的 10 分鐘內安裝新版 Service Worker，會把**舊版 HTML 存進新版快取**（`todomaster-v6.3` 裡裝著 v6.2.1，伺服器完全沒收到 `TodoMaster.html` 請求）；加上 HTML 是 cache-first、且 `sw.js` 位元組不變就不會重新安裝，這個汙染的快取無從修復
+- ✅ **`sw.js` 重寫**：
+  - 安裝時用 `cache:'reload'` 略過 HTTP 快取，新快取一定是線上當下的版本
+  - HTML 改**網路優先**（`cache:'no-cache'`，未變動只回 304）：線上永遠是最新版；離線、伺服器錯誤或超過 4 秒才用快取，並在背景繼續更新快取
+  - 圖示改為**選用**：抓不到不會讓整個 Service Worker 安裝失敗（舊版任一圖示 404 就整個裝不起來）
+  - 清舊快取只動 `todomaster-` 前綴（快取空間是整個網域共用，舊寫法會刪掉同網域其他專案的快取）
+  - 版本更新（`activate` 時發現舊快取）自動讓已開啟的頁面重新載入，**卡在舊版的頁面會自己換新版**；全新安裝不重新載入
+  - 只攔截同來源 GET；跨來源與非 GET（如雲端同步呼叫 `api.github.com`）不經過 Service Worker
+- ✅ **`TodoMaster.html` 註冊碼**：`register('sw.js', { updateViaCache: 'none' })`，並在每次回到前景（`visibilitychange`）主動 `reg.update()`——手機 PWA 常駐背景、不會重新載入頁面，原本要等到重新導覽才會發現新版
+- ✅ 測試（headless Edge/Chromium + 模擬 Pages `max-age=600`）：重現汙染快取、把 v6.3.1 疊在汙染狀態上自動修復；全新安裝、HTML 網路優先與 304、離線、慢速網路（4 秒逾時改用快取、背景仍更新）、跨來源 GET/PUT、下一版發布不被 HTTP 快取汙染、其他專案快取不受影響、回到前景自動更新、圖示 404 仍可安裝，共 17 項通過
+- ⚠️ **行為變更**：有網路時每次開啟會多一次對 `TodoMaster.html` 的條件式請求（通常回 304，很輕量）；離線仍可使用
+- ⚠️ **維護規則**：每次發版須同步更新 `<title>`、`APP_VERSION`、`sw.js` 的 `CACHE_NAME`（三者一致）——`sw.js` 位元組改變才會觸發手機端更新
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v6.3.1`
 
 ### v6.3 (2026-09-24) - 同步改善：GitHub 私有 repo 自動合併同步
 - ✅ **新增雲端同步**：以 GitHub Contents API 讀寫私有 repo 的 `state.json`，桌面（`file://`）與 Android 皆可使用，不再需要「匯出 → 第三方雲端搬檔 → 匯入」。傳輸層 `GitHubTransport`（`sha` 樂觀並發，409/422 → 重新拉取、合併、重試，最多 5 輪；`If-None-Match` 條件式請求，304 不計 rate limit；`cache:'no-store'` 避開瀏覽器 60 秒快取；>1MB 時改用 raw 讀取）＋合併引擎 `mergeStates()`＋排程與狀態 `CloudSync`
@@ -537,6 +553,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 - [ ] 測試同步備份（若有相關修改）
 - [ ] 確保未引入新的 console 錯誤
 - [ ] 更新 README 版本號
+- [ ] `<title>`、`APP_VERSION`、`sw.js` 的 `CACHE_NAME` 三者版本一致（`sw.js` 位元組改變才會觸發手機 PWA 更新）
 - [ ] 在 `backups/` 建立更新日誌
 - [ ] 向使用者提供完整的變更報告
 
@@ -562,7 +579,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ```
 TodoMaster/
-├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.3)
+├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.3.1)
 ├── README.md                              ← 【指南】本維護文檔
 └── backups/
     ├── TodoMaster_v{版本}_{日期}.html     ← 【備份】完整版本備份
@@ -596,7 +613,10 @@ A: 不需要。使用者直接打開本地 TodoMaster.html 即可，所有數據
 A: 使用「☁️ 雲端同步」：一次性建立私有 repo `todomaster-data` 與 Fine-grained Token，之後各裝置自動雙向合併，不必手動匯出/匯入。步驟見上方「☁️ 雲端同步設定」。
 
 **Q: 手機沒有顯示我在電腦做的修改？**  
-A: 側邊欄狀態列會顯示同步狀態；點「🔄 立即同步」。若顯示「Token 失效」請重新貼 Token；若顯示舊版介面，完全關閉 PWA 重開兩次（Service Worker 為 cache-first）。
+A: 側邊欄狀態列會顯示同步狀態；點「🔄 立即同步」。若顯示「Token 失效」請重新貼 Token；若頂欄版本號不是最新，見下一題。
+
+**Q: 手機顯示舊版（頂欄版本號不是最新）怎麼辦？**  
+A: 先確認電腦已 `git push origin master`，且 `https://gjpswhaod.github.io/todomaster/TodoMaster.html` 在電腦瀏覽器顯示最新版。v6.3.1 起，開啟 App 會自動偵測並換上新版（畫面可能自動重新載入一次）：打開 App、等約 10 秒；沒變就完全關閉 PWA 再開一次。**不要**用「清除網站資料」——會清掉手機上的任務與同步設定（要清之前務必先按「🔄 立即同步」）。從 v6.3 以前的版本（Service Worker 為 cache-first、可能已被汙染）升級，只要部署 v6.3.1 之後開一次 App 即可自動修復。
 
 **Q: 備份文件要保留多久？**  
 A: 建議保留最近 10 個版本，定期清理過期備份。
@@ -609,5 +629,5 @@ A: 新版本需完全相容舊版本的 localStorage 格式，做好數據遷移
 > **維護指南**: 本 README 規範了 Claude Code 維護 TodoMaster 的工作流程、版本管理和檔案規範。每次修改前閱讀，修改後更新版本號和日誌。
 
 **最後更新**: 2026-09-24  
-**當前版本**: v6.3  
+**當前版本**: v6.3.1  
 **應用狀態**: ✅ 穩定版本

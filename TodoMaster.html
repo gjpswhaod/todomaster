@@ -16,11 +16,16 @@
     <script>
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('sw.js').catch(() => {});
+          navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(reg => {
+            // 手機 PWA 常駐背景、不會重新載入頁面；每次回到前景時主動檢查有沒有新版 Service Worker
+            document.addEventListener('visibilitychange', () => {
+              if (document.visibilityState === 'visible') reg.update().catch(() => {});
+            });
+          }).catch(() => {});
         });
       }
     </script>
-    <title>TodoMaster v6.3 - 任務管理工具</title>
+    <title>TodoMaster v6.3.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -916,7 +921,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.3';
+        const APP_VERSION = 'v6.3.1';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
