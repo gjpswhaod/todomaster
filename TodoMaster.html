@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.3.1 - 任務管理工具</title>
+    <title>TodoMaster v6.3.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -883,6 +883,31 @@
             resize: vertical;
         }
 
+        /* 整理重複任務 */
+        .dup-group {
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 10px;
+        }
+        .dup-title { font-weight: 600; margin-bottom: 6px; word-break: break-word; }
+        .dup-title small { color: var(--text-secondary); font-weight: 400; }
+        .dup-date { white-space: nowrap; }
+        .dup-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 4px 10px;
+            padding: 4px 0;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+        .dup-row.keep { color: var(--accent-success); }
+        .dup-row input { accent-color: var(--accent-primary); cursor: pointer; flex-shrink: 0; }
+        label.dup-row { cursor: pointer; }
+        .dup-tag { color: var(--accent-secondary); }
+        .dup-note { color: var(--text-secondary); }
+
         .notification {
             position: fixed;
             bottom: 20px;
@@ -921,7 +946,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.3.1';
+        const APP_VERSION = 'v6.3.2';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1048,6 +1073,10 @@
                 <button class="filter-item" id="compressBtn">
                     <span class="filter-icon">📦</span>
                     壓縮任務
+                </button>
+                <button class="filter-item" id="dedupeBtn">
+                    <span class="filter-icon">🧹</span>
+                    整理重複任務
                 </button>
             </div>
 
@@ -1455,6 +1484,22 @@
         </div>
     </div>
 
+    <!-- 整理重複任務模態框 -->
+    <div class="modal" id="dedupeModal">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">🧹 整理重複任務</div>
+            <div class="sync-help" id="dedupeSummary"></div>
+            <div id="dedupeList"></div>
+            <div class="sync-help" style="margin: 12px 0 0;">
+                刪除前會先備份本機資料；刪除會同步到其他裝置。若已連線雲端同步，也可到 GitHub 的 commit 歷史還原。
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('dedupeModal')">取消</button>
+                <button type="button" class="btn btn-primary" id="dedupeConfirmBtn">刪除勾選的</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 完成時間詢問模態框 -->
     <div class="modal" id="completeTimeModal">
         <div class="modal-content" style="max-width: 400px;">
@@ -1778,6 +1823,68 @@
             return null;
         }
         // SYNC-CORE-END
+
+        // DEDUPE-BEGIN
+        // ===== 重複任務偵測（純函式，可單獨測試）=====
+        // 迴圈任務完成時會自動建立「下一次」（新 id）。兩台裝置各自完成同一個任務、或舊資料與新資料合併後，
+        // 同一個任務就可能同時存在多份「未完成」的副本；這裡把它們找出來，只保留最新的一份。
+        const DUP_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+        function dupDaysBetween(fromStr, toStr) {
+            return Math.round((Date.parse(toStr + 'T00:00:00Z') - Date.parse(fromStr + 'T00:00:00Z')) / 86400000);
+        }
+
+        function dupCompareRank(a, b) {
+            for (let i = 0; i < a.length; i++) {
+                if (a[i] < b[i]) return -1;
+                if (a[i] > b[i]) return 1;
+            }
+            return 0;
+        }
+
+        /**
+         * 找出重複的「未完成」迴圈／群組任務。
+         * - 只看：未完成、未壓縮、有具體日期、且是迴圈任務或群組任務（一般單次任務同名不算重複；暫存與不限期不比較）
+         * - 「同一個任務」＝ 標題（去頭尾空白）＋分類＋群組 都相同
+         * - 已完成的不列入：迴圈任務每一次完成都是一筆歷史紀錄，本來就會有很多筆
+         * - 保留優先序：日期較晚 > 已完成次數較多 > 較晚修改 > id（保證任何順序、任何裝置都選出同一份）
+         * - 預設勾選刪除：已逾期的較早份，或與保留者「同一次」（日期與完成次數皆相同）的完全重複份
+         */
+        function findDuplicateGroups(tasks, todayStr) {
+            const buckets = new Map();
+            for (const t of tasks) {
+                if (!t || t.completed || t.compressed) continue;
+                const recurring = !!(t.recurring && t.recurring.enabled);
+                if (!recurring && !t.groupId) continue;
+                if (!DUP_DATE_RE.test(t.date || '') || t.date === '9999-12-31') continue;
+                const key = [String(t.title || '').trim(), t.category || '', t.groupId || ''].join('\u0001');
+                if (!buckets.has(key)) buckets.set(key, []);
+                buckets.get(key).push(t);
+            }
+            const countOf = t => (t.recurring && t.recurring.completedCount) || 0;
+            const rankOf = t => [t.date, countOf(t), t.updatedAt || 0, String(t.id)];
+            const groups = [];
+            for (const list of buckets.values()) {
+                if (list.length < 2) continue;
+                const sorted = [...list].sort((a, b) => dupCompareRank(rankOf(b), rankOf(a)));
+                const keep = sorted[0];
+                const remove = sorted.slice(1).map(t => {
+                    const overdue = t.date < todayStr;
+                    const sameOccurrence = t.date === keep.date && countOf(t) === countOf(keep);
+                    return {
+                        task: t,
+                        overdue,
+                        overdueDays: overdue ? dupDaysBetween(t.date, todayStr) : 0,
+                        sameOccurrence,
+                        checked: overdue || sameOccurrence
+                    };
+                });
+                groups.push({ title: String(keep.title || '').trim(), groupName: keep.groupName || '', keep, remove });
+            }
+            groups.sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : String(a.keep.id) < String(b.keep.id) ? -1 : 1));
+            return groups;
+        }
+        // DEDUPE-END
 
         // ===== 傳輸層：GitHub Contents API =====
         // 樂觀並發：PUT 需帶目前檔案的 blob sha，過期回 409（缺 sha 回 422）→ 上層重新拉取、合併、重試。
@@ -3268,6 +3375,11 @@
                             return;
                         }
 
+                        if (targetId === 'dedupeBtn') {
+                            this.openDedupeModal();
+                            return;
+                        }
+
                         if (targetId === 'compressBtn') {
                             const count = this.tasks.filter(t => t.completed && !t.compressed).length;
                             if (count === 0) {
@@ -4085,6 +4197,57 @@
                     console.error('[Backup] 匯入失敗:', e);
                     this.showNotification('❌ 匯入失敗：' + (e instanceof SyncError ? e.message : '檔案不是有效的 TodoMaster 備份'));
                 }
+            }
+
+            // ===== 整理重複任務 =====
+            // 先做一次雲端同步（讓這台看到的是各裝置合併後的完整資料），再列出重複的任務供勾選刪除。
+            async openDedupeModal() {
+                if (this.cloud && this.cloud.configured) await this.cloud.syncNow('manual');
+                const groups = findDuplicateGroups(this.tasks, localDateStr());
+                if (groups.length === 0) {
+                    this.showNotification('✅ 沒有找到重複的任務');
+                    return;
+                }
+                const esc = s => this.escapeHtml(String(s));
+                const rows = groups.map(g => {
+                    const keepHtml = `<div class="dup-row keep"><span>✅ 保留</span><span class="dup-date">${esc(g.keep.date)}</span>${g.keep.date < localDateStr() ? '<span>（已逾期）</span>' : ''}</div>`;
+                    const removeHtml = g.remove.map(r => {
+                        const why = r.overdue
+                            ? `<span class="dup-tag">逾期 ${r.overdueDays} 天</span>`
+                            : r.sameOccurrence
+                                ? '<span class="dup-tag">與保留的是同一次（完全重複）</span>'
+                                : '<span class="dup-note">尚未逾期，預設不刪</span>';
+                        return `<label class="dup-row"><input type="checkbox" data-dup-id="${esc(r.task.id)}"${r.checked ? ' checked' : ''}><span>🗑️ 刪除</span><span class="dup-date">${esc(r.task.date)}</span>${why}</label>`;
+                    }).join('');
+                    const sub = g.groupName ? ` <small>· 群組：${esc(g.groupName)}</small>` : '';
+                    return `<div class="dup-group"><div class="dup-title">🔁 ${esc(g.title)}${sub}</div>${keepHtml}${removeHtml}</div>`;
+                }).join('');
+                document.getElementById('dedupeList').innerHTML = rows;
+                const total = groups.reduce((n, g) => n + g.remove.length, 0);
+                document.getElementById('dedupeSummary').textContent =
+                    `找到 ${groups.length} 個重複的任務（共 ${total} 份較早的副本）。每個任務只保留日期最晚的一份；已逾期或完全重複的副本已預設勾選，可自行取消勾選。`;
+                const list = document.getElementById('dedupeList');
+                const btn = document.getElementById('dedupeConfirmBtn');
+                const refresh = () => {
+                    const n = list.querySelectorAll('input[data-dup-id]:checked').length;
+                    btn.textContent = `刪除勾選的（${n}）`;
+                    btn.disabled = n === 0;
+                };
+                list.onchange = refresh;
+                btn.onclick = () => this.confirmDedupe();
+                refresh();
+                this.openModal('dedupeModal');
+            }
+
+            confirmDedupe() {
+                const ids = new Set([...document.querySelectorAll('#dedupeList input[data-dup-id]:checked')].map(el => el.dataset.dupId));
+                if (ids.size === 0) return;
+                this._savePreSyncBackup(this._exportState());   // 刪除前先留一份本機快照（app.restorePreSyncBackup() 可還原）
+                this.tasks = this.tasks.filter(t => !ids.has(String(t.id)));
+                this.saveToStorage();                            // 消失的 id 會被記成刪除標記，隨雲端同步傳到其他裝置
+                closeModal('dedupeModal');
+                this.updateUI();
+                this.showNotification(`🧹 已刪除 ${ids.size} 份重複任務`);
             }
 
             // ===== 雲端同步：設定畫面與事件 =====

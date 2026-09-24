@@ -1,5 +1,5 @@
-// 維護規則：CACHE_NAME 必須與 TodoMaster.html 的 APP_VERSION 一致（例如 APP_VERSION = 'v6.3.1' → 'todomaster-v6.3.1'）。
-const CACHE_NAME = 'todomaster-v6.3.1';
+// 維護規則：CACHE_NAME 必須與 TodoMaster.html 的 APP_VERSION 一致（例如 APP_VERSION = 'v6.3.2' → 'todomaster-v6.3.2'）。
+const CACHE_NAME = 'todomaster-v6.3.2';
 const CACHE_PREFIX = 'todomaster-';   // 快取儲存空間是「整個網域」共用，只能動自己前綴的快取，不可碰同網域其他專案
 const REPO = '/todomaster';
 const HTML_URL = `${REPO}/TodoMaster.html`;
