@@ -5,7 +5,7 @@
 此資料夾用於 **Claude Code 維護和開發 TodoMaster 應用**。
 
 **主應用**：`TodoMaster.html`  
-**版本**：6.2.1 (2026-09-20)  
+**版本**：6.3 (2026-09-24)  
 **狀態**：✅ 穩定版本  
 **責任方**：Claude Code
 
@@ -60,10 +60,14 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 - **⏭️ 超前**：未到截止日期即完成
 - **逾期重新安排**：逾期任務用「重新安排到今天」時，記為原定日期的時間損失（負值時間收支），但**不增加**原定日期的預定時間（改期後新日期會再計一次，避免重複）；拖曳或直接改日期則不計入
 
-### 同步備份
-- 🔗 **設定同步資料夾** - 連結本地資料夾（OneDrive/雲端）
-- ⬆️ **匯出同步** - 寫入 JSON 至同步資料夾
-- ⬇️ **匯入同步** - 從同步資料夾讀取
+### 雲端同步（v6.3 起，取代舊的「同步資料夾」）
+- ☁️ **自動雙向同步** - 資料同步到你自己的 **GitHub 私有 repo**（單一 `state.json`），桌面（`file://`）與手機（Android PWA）皆可，不必再手動匯出/搬檔/匯入
+- 🔀 **自動合併，不是整檔覆蓋** - 兩台各自修改也不會互相蓋掉：以任務為單位比對 `updatedAt`（同一任務同時修改 → 較晚者勝），刪除以 `deletedTasks` 標記傳播，標籤與逾期損失紀錄取聯集
+- ⏱️ **觸發時機** - 開啟 App、回到前景/視窗聚焦、恢復連線、前景每 60 秒輪詢，以及每次修改後防抖 5 秒自動上傳；離線時照常使用，恢復連線後自動補上傳
+- 📱 **新裝置免打字** - 「雲端同步設定」可產生「新裝置設定連結」，在手機開啟即自動帶入設定（連結含 Token，僅限自用，用完即刪）
+- 🕘 **可回復** - 每次同步是一個 git commit；套用遠端資料前，本機會先留一份快照（`todoPreSyncBackup`）
+- 💾 **備份檔** - 「匯出備份檔／匯入備份檔（合併）」桌面與手機通用，作為離線保底，也可匯入 v6.2 以前的 `todomaster-backup-*.json`
+- 設定步驟見下方「☁️ 雲端同步設定」
 
 ### 其他功能
 - 📦 **壓縮任務** - 整理過期或已完成任務；完成超過 30 天的任務與逾期損失記錄會在開 App 時自動清除（`purgeOldData()`）
@@ -81,11 +85,64 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ## 快速開始
 
-直接在瀏覽器中打開 `TodoMaster.html` 即可，無需安裝或配置。
+直接在瀏覽器中打開 `TodoMaster.html` 即可，無需安裝或配置。要跨裝置同步，另見下一節。
+
+---
+
+## ☁️ 雲端同步設定
+
+只需設定一次（約 5 分鐘）。資料放在**你自己帳號下的私有 repo**，App 用 GitHub API 讀寫；App 會拒絕連到公開 repo。
+
+### 步驟 A：建立私有資料 repo
+1. 登入 GitHub → 右上 **＋ → New repository**
+2. Repository name：`todomaster-data`；可見性選 **Private**
+3. **勾選「Add a README file」**（讓 repo 非空，最穩妥）→ **Create repository**
+
+> ⚠️ 不要用 `todomaster` 這個 repo：它是公開的（GitHub Pages），任務資料會被任何人看到。
+
+### 步驟 B：建立 Fine-grained Token（只授權這一個 repo）
+1. 右上頭像 → **Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token**
+2. Token name：`TodoMaster Sync`；Expiration：**1 year**（到期前需更換，App 會顯示「Token 失效」）
+3. Resource owner：你自己；Repository access：**Only select repositories** → 只選 `todomaster-data`
+4. Permissions → Repository permissions → **Contents：Read and write**（Metadata: Read 會自動帶入）
+5. **Generate token** → 立即複製（只顯示一次）
+
+### 步驟 C：第一台裝置（請用「資料最新、最完整」的那台）
+開啟 `TodoMaster.html` → 側邊欄「☁️ 雲端同步 → ⚙️ 雲端同步設定」→ 填入帳號、`todomaster-data`、貼上 Token → **測試並儲存**。連線成功後本機資料會自動上傳。
+
+### 步驟 D：其他裝置（例如 Android）
+- 先確認 v6.3 已部署到 GitHub Pages（`git push origin master`），手機完全關閉 PWA 後重開（Service Worker 為 cache-first，可能需重開兩次才換新版）
+- 在第一台裝置的「雲端同步設定」底部按 **📋 複製連結**，用你自己的管道傳到手機（如 LINE 記事本/Keep），在手機開啟連結 → 確認對話框 → 自動設定並同步。**用完請刪除該則訊息**（連結含 Token）
+- 也可以在手機的設定畫面手動貼上 Token
+
+### 狀態列說明
+`☁️ 已同步 · N 分鐘前`／`⏳ 待上傳變更`／`⚠️ 離線，恢復連線後自動同步`／`❌ Token 失效…`（到「雲端同步設定」重新貼 Token）。「🔄 立即同步」可隨時手動觸發。
+
+### 資料格式與回復
+- `state.json`：`{ schema: 2, tasks, tags, overdueLossLog, deletedTasks, … }`；每筆任務多了 `updatedAt`／`orderAt`（毫秒時間戳，內容與排序各自比對）
+- 誤操作或想回到某個時間點：到 `todomaster-data` 的 **commits** 歷史還原 `state.json`，再於 App 按「🔄 立即同步」
+- 本機保底：開發者主控台執行 `app.restorePreSyncBackup()` 可還原「套用遠端資料前」的本機快照（只留最近一份）
+- 同一任務在兩台裝置**同時**修改時，以較晚修改者為準（任務層級，不是欄位層級）
 
 ---
 
 ## 版本歷史
+
+### v6.3 (2026-09-24) - 同步改善：GitHub 私有 repo 自動合併同步
+- ✅ **新增雲端同步**：以 GitHub Contents API 讀寫私有 repo 的 `state.json`，桌面（`file://`）與 Android 皆可使用，不再需要「匯出 → 第三方雲端搬檔 → 匯入」。傳輸層 `GitHubTransport`（`sha` 樂觀並發，409/422 → 重新拉取、合併、重試，最多 5 輪；`If-None-Match` 條件式請求，304 不計 rate limit；`cache:'no-store'` 避開瀏覽器 60 秒快取；>1MB 時改用 raw 讀取）＋合併引擎 `mergeStates()`＋排程與狀態 `CloudSync`
+- ✅ **自動合併取代整檔覆蓋**：`saveToStorage()` 這唯一出口新增變更偵測（`_stampChanges()`，比對指紋快照，不必修改 15 個呼叫點）：內容變動蓋 `updatedAt`、僅排序變動只蓋 `orderAt`、消失的任務寫入 `deletedTasks`（保留 30 天）。合併規則見「雲端同步設定」與 `mergeStates()` 註解
+- ✅ **同步中的編輯不遺失**：網路往返期間使用者又編輯的內容，套用遠端資料前會以「此刻」的本機狀態再合併一次，並維持「待上傳」
+- ✅ **時鐘偏移校正**：以 push 回應的 commit 時間校正兩台裝置的時鐘差（差距 ≥ 3 秒才校正）
+- ✅ **新增「新裝置設定連結」**（`#sync=…`，fragment 不送伺服器，開啟後立即清除網址）；連線設定會驗證 repo 必須為私有
+- ✅ **備份檔改為手機/桌面通用**：`匯出備份檔`（`<a download>`）＋`匯入備份檔（合併）`（`<input type="file">`，可匯入 v6.2 以前的備份，套用前留本機快照）
+- 🐛 **修正舊同步機制的資料遺失風險**：舊版「啟動自動匯入」套用備份後不會更新 `todoSyncDate`，導致每次啟動都可能用同一份舊備份覆蓋本機期間的修改；且手機端實際上沒有任何同步/匯入路徑（同步 UI 被隱藏、手動備份已於 v4.9 移除）。這些問題隨新機制一併消除
+- 🧹 **移除** 資料夾同步（`showDirectoryPicker`／IndexedDB `TodoMasterSync` handle／`todoSyncDate`／Android 降級腳本）；啟動時自動清除這些舊殘留。舊版本保留於 `backups/TodoMaster_v6.2.1_2026-09-24.html`
+- 🔧 新任務 id 由 `Date.now().toString()` 改為 `genId()`（`crypto.randomUUID()`，不支援時退回時間戳＋亂數），避免兩台裝置同毫秒撞號；舊 id 不變
+- 🔧 `purgeOldData()` 與合併共用 `isPurgeableTask()`，清除舊資料不寫刪除標記、也不會被合併「復活」
+- ⚠️ **行為變更**：(1) 側邊欄「同步備份」改為「雲端同步」＋「備份檔」；(2) 匯入備份檔改為「合併」而非「取代」；(3) 首次連線請先用資料最新的裝置，舊資料（無 `updatedAt`）與遠端同 id 且時間戳相同時以遠端（先上傳者）為準
+- ✅ 資料相容：`localStorage` 既有格式不變，僅新增 `todoDeletedTasks`／`todoDeviceId`／`todoSyncConfig`／`todoSyncMeta`／`todoPreSyncBackup`；舊備份 JSON 可匯入
+- ✅ 測試：`mergeStates` 等純函式 53 項單元測試（LWW、平手、刪除 vs 編輯、tombstone 過期、排序獨立、交換律/結合律/冪等、輸入不被修改、舊格式、base64 往返、設定連結編解碼）；以模擬 GitHub Contents API 伺服器做雙裝置整合測試（首次連線聯集、離線編輯後收斂、刪除傳播且不復活、409 重試與連續 5 次衝突、Token 失效後不自動重試、遠端檔案損毀/schema 較新時拒絕覆蓋、ETag 304、同步進行中編輯、時鐘偏移、>1MB raw 讀取、設定連結、備份檔匯出入）
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v6.3`
 
 ### v6.2.1 (2026-09-20) - 時間計算2
 - ✅ **逾期重新安排不再增加原定日期的預定時間**：逾期任務按「📅 重新安排到今天」（含「全部重新安排」）時，時間統計「每日趨勢圖」原本會同時讓原定日期的「預定時間」折線 +N 分、時間收支 −N 分；任務改期後在新日期完成時預定時間又會再計一次 N，造成重複計算。現在原定日期只記時間收支 −N 分（逾期損失照記），「預定時間」不再增加
@@ -373,7 +430,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 **TodoMaster.html** 包含三部分（共約 4025 行）：
 
 1. **HTML** (前 ~1240 行)
-   - 側邊欄菜單（視圖、分類、標籤、選項、同步備份）
+   - 側邊欄菜單（視圖、分類、標籤、選項、雲端同步、備份檔）
    - 主內容區（任務列表、統計卡片）
    - 模態框：新增/編輯任務、標籤管理、完成時間詢問、Block 計時、時間統計
 
@@ -391,7 +448,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
    - dragover 委派監聽器（`setupEventListeners()` 內綁定一次）
    - Block 分段計時（`blockTimeModal`）
    - 迴圈次數與結束日期順延（`recomputeRecurringUntil`）
-   - 同步備份（File System Access API）
+   - 雲端同步（`// SYNC-CORE-BEGIN…END` 純函式：`mergeStates`／`stateDigest`／`normalizeState`／base64；`GitHubTransport`；`CloudSync`）與備份檔匯出/匯入（`exportBackupFile`／`importBackupFile`）；變更偵測在 `saveToStorage()` → `_stampChanges()`
    - 時間統計（每日趨勢圖、日曆視圖、分類分析）
 
 ---
@@ -400,8 +457,8 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 1. **單一文件** - 所有代碼在 `TodoMaster.html` 中
 2. **零依賴** - 純 HTML5 + JavaScript，無外部庫
-3. **本地存儲** - 所有數據在 `localStorage`，無伺服器
-4. **隱私優先** - 用戶數據不上傳任何地方
+3. **本地存儲** - 所有數據在 `localStorage`，無自建伺服器（雲端同步只是選用的副本）
+4. **隱私優先** - 預設不上傳任何地方；啟用雲端同步後，資料只會上傳到使用者自己的 GitHub **私有** repo（App 拒絕公開 repo），Token 僅存於本機 `localStorage`
 5. **手機友好** - 響應式設計，768px 斷點
 
 ---
@@ -492,7 +549,8 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 - [ ] 按分類和標籤過濾
 - [ ] 拖曳排序任務
 - [ ] 迴圈群組功能（完成後自動建立下次）
-- [ ] 設定同步資料夾 / 匯出同步 / 匯入同步
+- [ ] 雲端同步：設定連線 / 立即同步 / 兩台裝置各自修改後收斂 / 刪除傳播 / 離線後恢復 / 產生並開啟新裝置設定連結
+- [ ] 匯出備份檔 / 匯入備份檔（合併，含 v6.2 以前的備份）
 - [ ] 在手機視圖測試（F12，768px 以下）
 - [ ] 側邊欄開啟/關閉/收合按鈕
 - [ ] 逾期視圖、所有任務視圖的到期日分區
@@ -504,7 +562,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ```
 TodoMaster/
-├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.2.1)
+├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.3)
 ├── README.md                              ← 【指南】本維護文檔
 └── backups/
     ├── TodoMaster_v{版本}_{日期}.html     ← 【備份】完整版本備份
@@ -524,7 +582,7 @@ TodoMaster/
 
 - **localStorage 限制**：約 5-10MB，支援 1000+ 個任務
 - **隱私模式**：隱身模式無法持久化數據
-- **同步備份**：需瀏覽器支援 File System Access API（Chrome/Edge）
+- **雲端同步**：需連網並使用自己的 GitHub 私有 repo + Fine-grained Token（最長 1 年到期）；非即時推播，另一台的修改會在其開啟／回到前景／最多約 60 秒內出現；同一任務同時修改以較晚者為準（任務層級）；請避免同一台裝置同時開多個分頁編輯
 - **舊瀏覽器**：需支援 ES6 的現代瀏覽器
 
 ---
@@ -532,10 +590,13 @@ TodoMaster/
 ## ❓ 常見問題
 
 **Q: 修改 HTML 後，需要上傳到伺服器嗎？**  
-A: 不需要。使用者直接打開本地 TodoMaster.html 即可，所有數據存在瀏覽器本地。
+A: 不需要。使用者直接打開本地 TodoMaster.html 即可，所有數據存在瀏覽器本地。（要讓 Android PWA 取得新版才需 `git push origin master` 部署到 GitHub Pages。）
 
 **Q: 如何跨設備同步資料？**  
-A: 使用「設定同步資料夾」功能，將同步資料夾指向 OneDrive 或其他雲端同步的本地目錄，再透過匯出/匯入同步。
+A: 使用「☁️ 雲端同步」：一次性建立私有 repo `todomaster-data` 與 Fine-grained Token，之後各裝置自動雙向合併，不必手動匯出/匯入。步驟見上方「☁️ 雲端同步設定」。
+
+**Q: 手機沒有顯示我在電腦做的修改？**  
+A: 側邊欄狀態列會顯示同步狀態；點「🔄 立即同步」。若顯示「Token 失效」請重新貼 Token；若顯示舊版介面，完全關閉 PWA 重開兩次（Service Worker 為 cache-first）。
 
 **Q: 備份文件要保留多久？**  
 A: 建議保留最近 10 個版本，定期清理過期備份。
@@ -547,6 +608,6 @@ A: 新版本需完全相容舊版本的 localStorage 格式，做好數據遷移
 
 > **維護指南**: 本 README 規範了 Claude Code 維護 TodoMaster 的工作流程、版本管理和檔案規範。每次修改前閱讀，修改後更新版本號和日誌。
 
-**最後更新**: 2026-09-20  
-**當前版本**: v6.2.1  
+**最後更新**: 2026-09-24  
+**當前版本**: v6.3  
 **應用狀態**: ✅ 穩定版本

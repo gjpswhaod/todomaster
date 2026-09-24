@@ -20,7 +20,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.2.1 - 任務管理工具</title>
+    <title>TodoMaster v6.3 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -644,6 +644,7 @@
         .form-group input[type="date"],
         .form-group input[type="time"],
         .form-group input[type="number"],
+        .form-group input[type="password"],
         .form-group textarea,
         .form-group select {
             background-color: var(--bg-tertiary);
@@ -660,6 +661,7 @@
         .form-group input[type="date"]:focus,
         .form-group input[type="time"]:focus,
         .form-group input[type="number"]:focus,
+        .form-group input[type="password"]:focus,
         .form-group textarea:focus,
         .form-group select:focus {
             outline: none;
@@ -828,6 +830,54 @@
             }
         }
 
+        /* 雲端同步狀態列 */
+        .cloud-status {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: flex-start;
+            gap: 4px;
+            line-height: 1.5;
+        }
+        .cloud-status.ok { color: var(--accent-success); }
+        .cloud-status.busy { color: var(--accent-primary); }
+        .cloud-status.warn { color: var(--category-review); }
+        .cloud-status.err { color: var(--accent-secondary); }
+
+        .sync-help {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            line-height: 1.6;
+        }
+        .sync-msg {
+            font-size: 0.85rem;
+            margin-top: 4px;
+            min-height: 1.2em;
+            line-height: 1.5;
+        }
+        .sync-msg.err { color: var(--accent-secondary); }
+        .sync-msg.ok { color: var(--accent-success); }
+        .sync-link-box {
+            margin-top: 20px;
+            padding-top: 16px;
+            border-top: 1px solid var(--bg-tertiary);
+        }
+        .sync-link-box textarea {
+            width: 100%;
+            min-height: 72px;
+            background-color: var(--bg-tertiary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 6px;
+            padding: 8px 10px;
+            color: var(--text-primary);
+            font-size: 0.75rem;
+            font-family: monospace;
+            word-break: break-all;
+            resize: vertical;
+        }
+
         .notification {
             position: fixed;
             bottom: 20px;
@@ -866,7 +916,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.2.1';
+        const APP_VERSION = 'v6.3';
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
             career: { emoji: '💼', label: '事業' },
@@ -1028,19 +1078,22 @@
             </div>
 
             <div class="sidebar-section">
-                <div class="sidebar-section-title">同步備份</div>
-                <div style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
-                    📁 <span id="syncFolderName">未設定</span>
-                </div>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="setSyncFolderBtn">
-                    🔗 設定同步資料夾
+                <div class="sidebar-section-title">雲端同步</div>
+                <div class="cloud-status" id="cloudSyncStatus">☁️ 未設定</div>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="cloudSyncNowBtn">
+                    🔄 立即同步
                 </button>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="exportSyncBtn">
-                    ⬆️ 匯出同步
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 14px;" id="cloudSyncSetupBtn">
+                    ⚙️ 雲端同步設定
                 </button>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center;" id="importSyncBtn">
-                    ⬇️ 匯入同步
+                <div class="sidebar-section-title">備份檔</div>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="exportFileBtn">
+                    💾 匯出備份檔
                 </button>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center;" id="importFileBtn">
+                    📂 匯入備份檔（合併）
+                </button>
+                <input type="file" id="importFileInput" accept=".json,application/json" style="display: none;">
             </div>
         </aside>
 
@@ -1349,6 +1402,54 @@
         </div>
     </div>
 
+    <!-- 雲端同步設定模態框 -->
+    <div class="modal" id="syncModal">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header">☁️ 雲端同步設定</div>
+            <div class="sync-help">
+                資料會同步到你自己的 <strong>GitHub 私有 repo</strong>（一個 <code>state.json</code>），各裝置自動合併，不必再手動搬檔。
+                Token 請使用 Fine-grained token，只授權該 repo 的 <strong>Contents：Read and write</strong>。
+                <br>首次使用請<strong>先在資料最新、最完整的那台裝置連線</strong>，其他裝置再連線，資料會自動合併。
+            </div>
+            <form id="syncForm" autocomplete="off">
+                <div class="form-group">
+                    <label for="syncOwner">GitHub 帳號（擁有者）</label>
+                    <input type="text" id="syncOwner" placeholder="例如 gjpswhaod" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="syncRepo">私有 Repository 名稱</label>
+                    <input type="text" id="syncRepo" placeholder="例如 todomaster-data" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="syncToken">Token（Fine-grained）</label>
+                    <input type="password" id="syncToken" placeholder="github_pat_…" autocomplete="off">
+                    <div class="sync-msg" id="syncFormMsg"></div>
+                </div>
+                <div class="modal-footer" style="margin-top: 8px; padding-top: 16px;">
+                    <button type="button" class="btn btn-secondary" id="syncDisconnectBtn" style="display: none; margin-right: auto;">
+                        中斷連線
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('syncModal')">
+                        關閉
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="syncSaveBtn">
+                        測試並儲存
+                    </button>
+                </div>
+            </form>
+            <div class="sync-link-box" id="syncLinkBox" style="display: none;">
+                <div class="sync-help" style="margin-bottom: 8px;">
+                    <strong>新裝置設定連結</strong>：在另一台裝置（例如手機）開啟此連結，就會自動帶入上面的設定。
+                    連結<strong>含有 Token</strong>，請只傳給自己，用完就刪除。
+                </div>
+                <textarea id="syncLinkText" readonly></textarea>
+                <button type="button" class="btn btn-secondary" id="syncCopyLinkBtn" style="margin-top: 8px;">
+                    📋 複製連結
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 完成時間詢問模態框 -->
     <div class="modal" id="completeTimeModal">
         <div class="modal-content" style="max-width: 400px;">
@@ -1457,47 +1558,634 @@
 
 
     <script>
-        // ===== 同步資料夾 IndexedDB 輔助 =====
-        const SYNC_DB_NAME = 'TodoMasterSync';
-        const SYNC_DB_STORE = 'dirHandle';
+        // ===== 雲端同步（v6.3）=====
+        // 三層結構：① 純函式（合併／編碼，可單獨測試）② GitHubTransport（傳輸）③ CloudSync（觸發時機、狀態、設定）。
+        // 資料主體仍是 localStorage；GitHub 私有 repo 內的 state.json 只是各裝置合併後的共同狀態。
 
-        function openSyncDB() {
-            return new Promise((resolve, reject) => {
-                const req = indexedDB.open(SYNC_DB_NAME, 1);
-                req.onupgradeneeded = e => e.target.result.createObjectStore(SYNC_DB_STORE);
-                req.onsuccess = e => resolve(e.target.result);
-                req.onerror = e => reject(e.target.error);
+        // SYNC-CORE-BEGIN
+        const SYNC_SCHEMA = 2;                 // state.json 資料版本（1 = v6.2 以前的備份檔：缺 updatedAt / deletedTasks）
+        const SYNC_TOMBSTONE_DAYS = 30;        // 刪除標記保留天數（與「完成超過 30 天即清除」對齊）
+        const SYNC_DATA_PATH = 'state.json';
+        const SYNC_SETUP_BASE = 'https://gjpswhaod.github.io/todomaster/TodoMaster.html';
+        const SYNC_SAFE_NAME = /^[A-Za-z0-9._-]{1,100}$/;
+
+        class SyncError extends Error {
+            // kind：network | auth | rate | conflict | schema | format | public | http
+            constructor(message, kind = 'http') {
+                super(message);
+                this.kind = kind;
+            }
+        }
+
+        function genId() {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+            return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+        }
+
+        // 鍵排序後序列化，讓「內容相同」一定得到相同字串（用於指紋與比對）
+        function stableStringify(v) {
+            if (v === undefined) return 'null';
+            if (v === null || typeof v !== 'object') return JSON.stringify(v);
+            if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+            return '{' + Object.keys(v).filter(k => v[k] !== undefined).sort()
+                .map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+        }
+
+        // 任務「內容」指紋：排除時間戳與排序欄位（排序另以 orderAt 獨立比較，避免拖曳排序蓋掉另一台的內容修改）
+        function taskContentFp(t) {
+            const rest = {};
+            for (const k in t) {
+                if (k === 'updatedAt' || k === 'orderAt' || k === 'order' || k === 'groupOrder') continue;
+                rest[k] = t[k];
+            }
+            return stableStringify(rest);
+        }
+        function taskOrderFp(t) {
+            return `${t.order ?? ''}|${t.groupOrder ?? ''}`;
+        }
+
+        // 已完成且完成日早於 cutoffStr（YYYY-MM-DD）者可清除；purgeOldData() 與合併共用同一規則
+        function isPurgeableTask(t, cutoffStr) {
+            if (!t.completed) return false;
+            const ref = t.completedDate
+                     || (t.completedAt ? t.completedAt.split('T')[0] : null)
+                     || t.date;
+            return !!ref && ref < cutoffStr;
+        }
+
+        // 與順序無關的狀態摘要：用來判斷「合併結果是否與本機／遠端不同」
+        function stateDigest(s) {
+            const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+            const del = s.deletedTasks || {};
+            return stableStringify({
+                t: [...(s.tasks || [])].sort(byId),
+                g: [...(s.tags || [])].sort(),
+                l: (s.overdueLossLog || []).map(stableStringify).sort(),
+                d: Object.keys(del).sort().map(k => [k, del[k]])
             });
         }
 
-        async function saveDirHandle(handle) {
-            const db = await openSyncDB();
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(SYNC_DB_STORE, 'readwrite');
-                tx.objectStore(SYNC_DB_STORE).put(handle, 'syncFolder');
-                tx.oncomplete = () => resolve();
-                tx.onerror = e => reject(e.target.error);
-            });
+        // 合併後有幾筆任務相對於 before 是新增／變更／移除（僅用於提示文字）
+        function countStateChanges(before, after) {
+            const b = new Map((before.tasks || []).map(t => [t.id, stableStringify(t)]));
+            const seen = new Set();
+            let n = 0;
+            for (const t of after.tasks || []) {
+                seen.add(t.id);
+                if (b.get(t.id) !== stableStringify(t)) n++;
+            }
+            for (const id of b.keys()) if (!seen.has(id)) n++;
+            return n;
         }
 
-        async function loadDirHandle() {
-            const db = await openSyncDB();
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(SYNC_DB_STORE, 'readonly');
-                const req = tx.objectStore(SYNC_DB_STORE).get('syncFolder');
-                req.onsuccess = e => resolve(e.target.result || null);
-                req.onerror = e => reject(e.target.error);
-            });
+        /**
+         * 合併兩份狀態（純函式，不修改輸入）。
+         * - 任務：以 id 聯集；同 id 取 updatedAt 較新者（平手取 remote＝先上傳者）；
+         *   order/groupOrder 另以 orderAt 決定，內容與排序互不覆蓋。
+         * - 刪除：deletedTasks（id → 刪除時間）。刪除晚於最後修改 → 維持刪除；刪除後又被編輯 → 復活並作廢標記。
+         * - 標籤：聯集（App 只會新增標籤）。
+         * - 逾期損失紀錄：同內容取兩邊出現次數的最大值（保留合法重複、去除跨裝置重複）。
+         * - opts.purgeCutoff：套用「完成超過 30 天清除」規則，避免合併把已清除的舊資料帶回來。
+         */
+        function mergeStates(local, remote, opts = {}) {
+            const now = opts.now ?? Date.now();
+            const ttl = SYNC_TOMBSTONE_DAYS * 86400000;
+            const L = { tasks: local.tasks || [], tags: local.tags || [], log: local.overdueLossLog || [], del: local.deletedTasks || {} };
+            const R = { tasks: remote.tasks || [], tags: remote.tags || [], log: remote.overdueLossLog || [], del: remote.deletedTasks || {} };
+
+            // 1) 刪除標記：聯集、取較晚者、丟棄過期
+            const deleted = {};
+            for (const src of [R.del, L.del]) {
+                for (const id of Object.keys(src)) {
+                    const at = src[id];
+                    if (!Number.isFinite(at) || now - at > ttl) continue;
+                    if (!(id in deleted) || at > deleted[id]) deleted[id] = at;
+                }
+            }
+
+            // 2) 任務（輸出順序：本機原順序在前、遠端新增在後，避免無謂的畫面重排）
+            const lMap = new Map(L.tasks.map(t => [t.id, t]));
+            const rMap = new Map(R.tasks.map(t => [t.id, t]));
+            const ids = [...lMap.keys(), ...[...rMap.keys()].filter(id => !lMap.has(id))];
+            let tasks = [];
+            for (const id of ids) {
+                const l = lMap.get(id), r = rMap.get(id);
+                let out = l || r;
+                if (l && r) {
+                    const win = (l.updatedAt || 0) > (r.updatedAt || 0) ? l : r;   // 平手取遠端
+                    const other = win === l ? r : l;
+                    out = win;
+                    if ((other.orderAt || 0) > (win.orderAt || 0)) {
+                        out = { ...win, orderAt: other.orderAt };
+                        if (other.order === undefined) delete out.order; else out.order = other.order;
+                        if (other.groupOrder === undefined) delete out.groupOrder; else out.groupOrder = other.groupOrder;
+                    }
+                }
+                const delAt = deleted[id];
+                if (delAt !== undefined) {
+                    if (delAt >= (out.updatedAt || 0)) continue;   // 刪除不早於最後修改 → 維持刪除
+                    delete deleted[id];                            // 刪除後又被編輯 → 任務復活，標記作廢
+                }
+                tasks.push(out);
+            }
+
+            // 3) 標籤
+            const tags = [...L.tags];
+            for (const g of R.tags) if (!tags.includes(g)) tags.push(g);
+
+            // 4) 逾期損失紀錄
+            const keyOf = r => stableStringify([r.date, r.taskId, r.minutes, r.taskTitle]);
+            const groupBy = arr => {
+                const m = new Map();
+                for (const rec of arr) {
+                    const k = keyOf(rec);
+                    if (!m.has(k)) m.set(k, []);
+                    m.get(k).push(rec);
+                }
+                return m;
+            };
+            const lg = groupBy(L.log), rg = groupBy(R.log);
+            let overdueLossLog = [];
+            for (const k of new Set([...lg.keys(), ...rg.keys()])) {
+                const a = lg.get(k) || [], b = rg.get(k) || [];
+                overdueLossLog.push(...(a.length >= b.length ? a : b));
+            }
+
+            // 5) 清除過舊資料
+            if (opts.purgeCutoff) {
+                tasks = tasks.filter(t => !isPurgeableTask(t, opts.purgeCutoff));
+                overdueLossLog = overdueLossLog.filter(rec => rec.date >= opts.purgeCutoff);
+            }
+
+            return { tasks, tags, overdueLossLog, deletedTasks: deleted };
         }
 
-        async function clearDirHandle() {
-            const db = await openSyncDB();
-            return new Promise((resolve, reject) => {
-                const tx = db.transaction(SYNC_DB_STORE, 'readwrite');
-                tx.objectStore(SYNC_DB_STORE).delete('syncFolder');
-                tx.oncomplete = () => resolve();
-                tx.onerror = e => reject(e.target.error);
-            });
+        // 驗證並正規化外部資料（遠端 state.json 或使用者匯入的備份檔）；舊版備份（無 schema）視為 v1
+        function normalizeState(raw) {
+            if (!raw || typeof raw !== 'object' || !Array.isArray(raw.tasks)) {
+                throw new SyncError('資料格式不正確（缺少 tasks）', 'format');
+            }
+            if ((raw.schema || 1) > SYNC_SCHEMA) {
+                throw new SyncError('資料版本比這個 App 新，請先更新 App（重新整理頁面）', 'schema');
+            }
+            const deletedTasks = {};
+            if (raw.deletedTasks && typeof raw.deletedTasks === 'object') {
+                for (const [k, v] of Object.entries(raw.deletedTasks)) if (Number.isFinite(v)) deletedTasks[k] = v;
+            }
+            return {
+                tasks: raw.tasks.filter(t => t && typeof t === 'object' && t.id !== undefined && t.id !== null),
+                tags: Array.isArray(raw.tags) ? raw.tags.filter(g => typeof g === 'string') : [],
+                overdueLossLog: Array.isArray(raw.overdueLossLog) ? raw.overdueLossLog.filter(r => r && typeof r === 'object') : [],
+                deletedTasks
+            };
+        }
+
+        // UTF-8 ⇄ base64（中文不可直接 btoa/atob）
+        function utf8ToB64(str) {
+            const bytes = new TextEncoder().encode(str);
+            let bin = '';
+            for (let i = 0; i < bytes.length; i += 0x8000) {
+                bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+            }
+            return btoa(bin);
+        }
+        function b64ToUtf8(b64) {
+            const bin = atob(b64.replace(/\s/g, ''));
+            const bytes = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+            return new TextDecoder().decode(bytes);
+        }
+
+        // 新裝置設定連結的 payload 編解碼（base64url；#sync=<payload>，fragment 不會送到任何伺服器）
+        function encodeSetupPayload(cfg) {
+            return utf8ToB64(JSON.stringify({ o: cfg.owner, r: cfg.repo, t: cfg.token }))
+                .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        }
+        function decodeSetupPayload(s) {
+            try {
+                let b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+                b64 += '='.repeat((4 - (b64.length % 4)) % 4);
+                const o = JSON.parse(b64ToUtf8(b64));
+                if (o && SYNC_SAFE_NAME.test(o.o) && SYNC_SAFE_NAME.test(o.r) && typeof o.t === 'string' && o.t.length >= 10) {
+                    return { owner: o.o, repo: o.r, token: o.t };
+                }
+            } catch (_) { /* 無效連結 */ }
+            return null;
+        }
+        // SYNC-CORE-END
+
+        // ===== 傳輸層：GitHub Contents API =====
+        // 樂觀並發：PUT 需帶目前檔案的 blob sha，過期回 409（缺 sha 回 422）→ 上層重新拉取、合併、重試。
+        class GitHubTransport {
+            constructor(cfg) {
+                this.cfg = cfg;
+            }
+
+            _api(path) {
+                return `${this.cfg.apiBase || 'https://api.github.com'}${path}`;
+            }
+
+            get _repoPath() {
+                return `/repos/${encodeURIComponent(this.cfg.owner)}/${encodeURIComponent(this.cfg.repo)}`;
+            }
+
+            _headers(extra = {}) {
+                return Object.assign({
+                    'Accept': 'application/vnd.github+json',
+                    'Authorization': `Bearer ${this.cfg.token}`,
+                    'X-GitHub-Api-Version': '2022-11-28'
+                }, extra);
+            }
+
+            async _fetch(url, init) {
+                let res;
+                try {
+                    // no-store：GitHub API 預設可被瀏覽器快取 60 秒，會讀到舊資料；改由自己用 ETag 條件式請求
+                    res = await fetch(url, Object.assign({ cache: 'no-store' }, init));
+                } catch (e) {
+                    throw new SyncError('網路連線失敗', 'network');
+                }
+                if (res.status === 401) throw new SyncError('Token 無效或已過期，請到「雲端同步設定」重新設定', 'auth');
+                if (res.status === 429 || (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0')) {
+                    throw new SyncError('已達 GitHub API 速率上限，稍後會自動重試', 'rate');
+                }
+                if (res.status === 403) throw new SyncError('Token 權限不足（需要該 repo 的 Contents：Read and write）', 'auth');
+                return res;
+            }
+
+            // 確認 repo 存在、Token 可用，且 repo 必須是私有（避免任務資料被公開）
+            async testConnection() {
+                const res = await this._fetch(this._api(this._repoPath), { headers: this._headers() });
+                if (res.status === 404) {
+                    throw new SyncError('找不到此 repo，或 Token 未授權它（請確認名稱，以及 Token 的 Repository access 有勾選此 repo）', 'auth');
+                }
+                if (!res.ok) throw new SyncError(`連線測試失敗（HTTP ${res.status}）`, 'http');
+                const info = await res.json();
+                if (info.private !== true) {
+                    throw new SyncError('此 repo 是公開的，任務資料會被任何人看到。請改用「私有（Private）」repo', 'public');
+                }
+                return info;
+            }
+
+            // 回傳 { notModified } | { missing } | { sha, etag, text }
+            async pull(etag) {
+                const url = this._api(`${this._repoPath}/contents/${SYNC_DATA_PATH}`);
+                const res = await this._fetch(url, { headers: this._headers(etag ? { 'If-None-Match': etag } : {}) });
+                if (res.status === 304) return { notModified: true };
+                if (res.status === 404) return { missing: true };
+                if (!res.ok) throw new SyncError(`讀取失敗（HTTP ${res.status}）`, 'http');
+                const json = await res.json();
+                let text;
+                if (json.encoding === 'base64' && json.content) {
+                    text = b64ToUtf8(json.content);
+                } else {
+                    // 檔案 > 1MB 時 Contents API 不回 content，改用 raw 媒體型別
+                    const raw = await this._fetch(url, { headers: this._headers({ 'Accept': 'application/vnd.github.raw+json' }) });
+                    if (!raw.ok) throw new SyncError(`讀取失敗（HTTP ${raw.status}）`, 'http');
+                    text = await raw.text();
+                }
+                return { sha: json.sha, etag: res.headers.get('ETag'), text };
+            }
+
+            // 回傳 { sha, commitDate }；sha 過期 → SyncError('conflict')
+            async push(text, sha, message) {
+                const body = { message, content: utf8ToB64(text) };
+                if (sha) body.sha = sha;
+                const res = await this._fetch(this._api(`${this._repoPath}/contents/${SYNC_DATA_PATH}`), {
+                    method: 'PUT',
+                    headers: this._headers({ 'Content-Type': 'application/json' }),
+                    body: JSON.stringify(body)
+                });
+                if (res.status === 409 || res.status === 422) throw new SyncError('遠端剛被其他裝置更新', 'conflict');
+                if (res.status === 404) throw new SyncError('找不到此 repo，或 Token 未授權它', 'auth');
+                if (!res.ok) throw new SyncError(`寫入失敗（HTTP ${res.status}）`, 'http');
+                const json = await res.json();
+                return {
+                    sha: json.content && json.content.sha,
+                    commitDate: json.commit && json.commit.committer && json.commit.committer.date
+                };
+            }
+        }
+
+        // ===== 同步引擎：狀態、觸發時機、設定 =====
+        const SYNC_CFG_KEY = 'todoSyncConfig';
+        const SYNC_META_KEY = 'todoSyncMeta';
+
+        function lsReadJson(key, fallback) {
+            try {
+                const v = localStorage.getItem(key);
+                return v ? JSON.parse(v) : fallback;
+            } catch (_) {
+                return fallback;
+            }
+        }
+
+        class CloudSync {
+            constructor(app) {
+                this.app = app;
+                this.cfg = lsReadJson(SYNC_CFG_KEY, null);   // { owner, repo, token }
+                this.meta = Object.assign(CloudSync.defaultMeta(), lsReadJson(SYNC_META_KEY, {}));
+                this.state = 'idle';                         // idle | syncing | offline | auth | error
+                this.message = '';
+                this.lastApplied = 0;                        // 最近一次同步從遠端套用了幾筆任務變更
+                this._running = null;
+                this._again = false;
+                this._pushTimer = null;
+                this._lastStart = 0;
+                this._lastPush = 0;
+                this._bound = false;
+            }
+
+            static defaultMeta() {
+                // sha/etag：上次看到的遠端版本；dirty：本機有尚未上傳的變更；clockOffset：與 GitHub 伺服器的時差（毫秒）
+                return { sha: null, etag: null, lastSyncedAt: 0, dirty: false, clockOffset: 0 };
+            }
+
+            get configured() {
+                return !!(this.cfg && this.cfg.owner && this.cfg.repo && this.cfg.token);
+            }
+
+            // 校正過的「現在」：所有 updatedAt / 刪除標記都用它，降低兩台裝置時鐘不一致造成的誤判
+            now() {
+                return Date.now() + (this.meta.clockOffset || 0);
+            }
+
+            _saveMeta() {
+                try { localStorage.setItem(SYNC_META_KEY, JSON.stringify(this.meta)); } catch (_) { /* 儲存空間不足時略過 */ }
+            }
+
+            _setState(state, message = '') {
+                this.state = state;
+                this.message = message;
+                this.renderStatus();
+            }
+
+            _ago(ms) {
+                const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+                if (s < 45) return '剛剛';
+                const m = Math.round(s / 60);
+                if (m < 60) return `${m} 分鐘前`;
+                const h = Math.round(m / 60);
+                if (h < 24) return `${h} 小時前`;
+                return `${Math.round(h / 24)} 天前`;
+            }
+
+            renderStatus() {
+                const el = document.getElementById('cloudSyncStatus');
+                if (!el) return;
+                let cls = '';
+                let text;
+                if (!this.configured) {
+                    text = '☁️ 未設定（請點下方「雲端同步設定」）';
+                } else if (this.state === 'syncing') {
+                    cls = 'busy';
+                    text = '🔄 同步中…';
+                } else if (this.state === 'offline') {
+                    cls = 'warn';
+                    text = '⚠️ 離線，恢復連線後自動同步' + (this.meta.dirty ? '（有待上傳變更）' : '');
+                } else if (this.state === 'auth' || this.state === 'error') {
+                    cls = 'err';
+                    text = '❌ ' + this.message;
+                } else if (this.meta.dirty) {
+                    cls = 'warn';
+                    text = '⏳ 待上傳變更';
+                } else if (this.meta.lastSyncedAt) {
+                    cls = 'ok';
+                    text = `☁️ 已同步 · ${this._ago(this.meta.lastSyncedAt)}`;
+                } else {
+                    text = '☁️ 尚未同步';
+                }
+                el.className = 'cloud-status' + (cls ? ' ' + cls : '');
+                el.textContent = text;
+            }
+
+            // 本機有變更（由 saveToStorage 呼叫）→ 標記待上傳，防抖後推送
+            markDirty() {
+                if (!this.configured) return;
+                if (!this.meta.dirty) {
+                    this.meta.dirty = true;
+                    this._saveMeta();
+                }
+                this.renderStatus();
+                this.schedulePush(5000);
+            }
+
+            schedulePush(delay = 5000) {
+                if (!this.configured) return;
+                clearTimeout(this._pushTimer);
+                // 兩次寫入至少間隔 10 秒（避開 GitHub 對連續寫入的次級速率限制）
+                const wait = Math.max(delay, this._lastPush + 10000 - Date.now());
+                this._pushTimer = setTimeout(() => this.syncNow('push'), wait);
+            }
+
+            // 綁定觸發時機（只綁一次）：回到前景、恢復連線、視窗聚焦、前景定時輪詢
+            bindTriggers() {
+                if (this._bound) return;
+                this._bound = true;
+                document.addEventListener('visibilitychange', () => {
+                    if (!this.configured) return;
+                    if (document.visibilityState === 'visible') this.syncNow('visible');
+                    else if (this.meta.dirty) this.syncNow('hidden');   // 切到背景前，盡量先把變更推上去
+                });
+                window.addEventListener('online', () => { if (this.configured) this.syncNow('online'); });
+                window.addEventListener('offline', () => { if (this.configured) this._setState('offline'); });
+                window.addEventListener('focus', () => { if (this.configured) this.syncNow('focus'); });
+                setInterval(() => {
+                    if (!this.configured) return;
+                    if (document.visibilityState === 'visible') this.syncNow('poll');
+                    else this.renderStatus();
+                }, 60000);
+            }
+
+            start() {
+                this.bindTriggers();
+                this.renderStatus();
+                if (this.configured) this.syncNow('startup');
+            }
+
+            async syncNow(reason = 'manual') {
+                if (!this.configured) return;
+                const manual = reason === 'manual' || reason === 'setup';
+                // Token 已失效時不自動重試（避免用無效 Token 反覆打 API），由使用者手動或重新設定後再試
+                if (!manual && this.state === 'auth') return;
+                // 回前景/聚焦/輪詢在短時間內只需要一次
+                if ((reason === 'visible' || reason === 'focus' || reason === 'poll') && Date.now() - this._lastStart < 10000) return;
+                if (this._running) {
+                    this._again = true;
+                    return this._running;
+                }
+                if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+                    this._setState('offline');
+                    return;
+                }
+                this._lastStart = Date.now();
+                this._running = this._run(reason)
+                    .catch(e => this._handleError(e))
+                    .finally(() => {
+                        this._running = null;
+                        if (this._again) {
+                            this._again = false;
+                            this.schedulePush(1000);
+                        }
+                    });
+                return this._running;
+            }
+
+            _handleError(e) {
+                if (e instanceof SyncError) {
+                    if (e.kind === 'network') this._setState('offline');
+                    else if (e.kind === 'auth') this._setState('auth', e.message);
+                    else this._setState('error', e.message);
+                } else {
+                    console.warn('[Sync] 未預期錯誤:', e);
+                    this._setState('error', '同步失敗：' + (e && e.message ? e.message : e));
+                }
+            }
+
+            _serialize(state) {
+                const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+                return JSON.stringify({
+                    schema: SYNC_SCHEMA,
+                    app: APP_VERSION,
+                    savedAt: new Date().toISOString(),
+                    deviceId: this.app.deviceId,
+                    tasks: [...state.tasks].sort(byId),   // 依 id 排序：讓 git 歷史的 diff 穩定易讀
+                    tags: state.tags,
+                    overdueLossLog: state.overdueLossLog,
+                    deletedTasks: state.deletedTasks
+                }, null, 1);
+            }
+
+            _adoptClock(commitDateStr, t0, t1) {
+                const server = Date.parse(commitDateStr);
+                if (!Number.isFinite(server)) return;
+                const offset = server - Math.round((t0 + t1) / 2);
+                // GitHub 回傳精度為秒；差距小於 3 秒視為時鐘一致，不做校正
+                this.meta.clockOffset = Math.abs(offset) < 3000 ? 0 : offset;
+            }
+
+            /**
+             * 一次同步：拉取 → 合併 → （有差異才）推送 → 套用回本機。
+             * 推送遇到 409（遠端剛被別台更新）就重新拉取再合併，最多 5 輪。
+             */
+            async _run(reason) {
+                const app = this.app;
+                const transport = new GitHubTransport(this.cfg);
+                this._setState('syncing');
+                this.lastApplied = 0;
+
+                for (let attempt = 0; attempt < 5; attempt++) {
+                    // 有待上傳變更時一律完整拉取；沒有變更才用 ETag 條件式請求（304 不計 rate limit）
+                    const useEtag = attempt === 0 && !this.meta.dirty && this.meta.etag;
+                    const pulled = await transport.pull(useEtag ? this.meta.etag : null);
+                    if (pulled.notModified) {
+                        this.meta.lastSyncedAt = Date.now();
+                        this._saveMeta();
+                        this._setState('idle');
+                        return;
+                    }
+
+                    let remote = null;
+                    if (!pulled.missing) {
+                        try {
+                            remote = normalizeState(JSON.parse(pulled.text));
+                        } catch (e) {
+                            if (e instanceof SyncError) throw e;
+                            // 遠端檔案損毀：絕不覆蓋它，請使用者到 GitHub 歷史還原
+                            throw new SyncError('遠端 state.json 格式損毀，已停止同步（請到 GitHub 的 commit 歷史還原）', 'format');
+                        }
+                    }
+
+                    const opts = { now: this.now(), purgeCutoff: app._purgeCutoffStr() };
+                    const local = app._exportState();
+                    const merged = mergeStates(local, remote || { tasks: [], tags: [], overdueLossLog: [], deletedTasks: {} }, opts);
+                    const mergedDigest = stateDigest(merged);
+
+                    let sha = pulled.sha || null;
+                    let etag = pulled.etag || null;
+                    if (!remote || mergedDigest !== stateDigest(remote)) {
+                        const t0 = Date.now();
+                        const deviceTag = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
+                        try {
+                            const res = await transport.push(
+                                this._serialize(merged),
+                                pulled.sha,
+                                `sync ${deviceTag} ${String(app.deviceId).slice(0, 8)} ${new Date().toISOString()}`
+                            );
+                            sha = res.sha;
+                            etag = null;
+                            this._lastPush = Date.now();
+                            this._adoptClock(res.commitDate, t0, Date.now());
+                        } catch (e) {
+                            if (e instanceof SyncError && e.kind === 'conflict' && attempt < 4) continue;
+                            if (e instanceof SyncError && e.kind === 'conflict') {
+                                throw new SyncError('多次寫入衝突，稍後會自動重試', 'conflict');
+                            }
+                            throw e;
+                        }
+                    }
+
+                    // 套用回本機：以「此刻」的本機狀態再合併一次（網路往返期間使用者可能又改了資料，不能覆蓋掉）
+                    const cur = app._exportState();
+                    const finalState = mergeStates(cur, merged, opts);
+                    const finalDigest = stateDigest(finalState);
+                    if (finalDigest !== stateDigest(cur)) {
+                        this.lastApplied = countStateChanges(cur, finalState);
+                        app._savePreSyncBackup(cur);
+                        app._applyState(finalState);
+                    }
+                    this.meta.sha = sha;
+                    this.meta.etag = etag;
+                    this.meta.dirty = finalDigest !== mergedDigest;   // 往返期間又有新變更 → 仍待上傳
+                    this.meta.lastSyncedAt = Date.now();
+                    this._saveMeta();
+                    if (this.meta.dirty) this.schedulePush(1500);
+                    this._setState('idle');
+                    if (this.lastApplied > 0) app.showNotification(`☁️ 已同步 ${this.lastApplied} 項變更`);
+                    return;
+                }
+            }
+
+            // ----- 設定 -----
+
+            // 驗證連線（含「必須是私有 repo」檢查）後儲存設定，並立即做第一次同步
+            async connect(cfg) {
+                // apiBase 僅供測試（指向模擬伺服器），只能程式設定、不會出現在設定連結或畫面上
+                const apiBase = cfg.apiBase || (this.cfg && this.cfg.apiBase);
+                if (apiBase) cfg = Object.assign({}, cfg, { apiBase });
+                await new GitHubTransport(cfg).testConnection();
+                const sameRepo = this.cfg && this.cfg.owner === cfg.owner && this.cfg.repo === cfg.repo;
+                this.cfg = { owner: cfg.owner, repo: cfg.repo, token: cfg.token };
+                if (apiBase) this.cfg.apiBase = apiBase;
+                localStorage.setItem(SYNC_CFG_KEY, JSON.stringify(this.cfg));
+                if (!sameRepo) {
+                    // 新的 repo：本機資料全部視為待上傳；完整拉取（不用 ETag）
+                    this.meta = Object.assign(CloudSync.defaultMeta(), { dirty: true, clockOffset: this.meta.clockOffset || 0 });
+                }
+                this._saveMeta();
+                this._setState('idle');
+                this.bindTriggers();
+                await this.syncNow('setup');
+                if (this.state === 'auth' || this.state === 'error') throw new SyncError(this.message, 'http');
+            }
+
+            disconnect() {
+                clearTimeout(this._pushTimer);
+                this.cfg = null;
+                this.meta = CloudSync.defaultMeta();
+                try {
+                    localStorage.removeItem(SYNC_CFG_KEY);
+                    localStorage.removeItem(SYNC_META_KEY);
+                } catch (_) { /* ignore */ }
+                this._setState('idle');
+            }
+
+            // 新裝置設定連結：桌面（file://）也指向 GitHub Pages 網址，方便在手機開啟
+            buildSetupLink() {
+                if (!this.configured) return '';
+                const base = location.protocol === 'file:' ? SYNC_SETUP_BASE : location.origin + location.pathname;
+                return `${base}#sync=${encodeSetupPayload(this.cfg)}`;
+            }
         }
 
         // ===== 數據模型 =====
@@ -1506,6 +2194,11 @@
                 this.tasks = [];
                 this.tags = [];
                 this.overdueLossLog = []; // 逾期任務「重新安排到今天」時記錄的原定日期損失：{ date, minutes, taskId, taskTitle }
+                this.deletedTasks = {};   // 刪除標記 { 任務id: 刪除時間(ms) }，雲端同步用來讓「刪除」也能跨裝置合併
+                this.deviceId = '';       // 本機裝置代號（僅用於 commit 訊息辨識）
+                this.cloud = null;        // 雲端同步引擎（CloudSync）
+                this._fpMap = new Map();  // 任務指紋快照 id → { c: 內容, o: 排序 }，saveToStorage 靠它找出「哪些任務變動了」
+                this._metaFp = '';        // tags + overdueLossLog 的指紋
                 this.currentFilter = 'all';
                 this.sortMode = 'drag'; // 'drag' 或 'fixed'
                 this.showCompleted = true;
@@ -1518,14 +2211,17 @@
             init() {
                 try {
                     this.loadFromStorage();
+                    this.cloud = new CloudSync(this);
+                    this._cleanupLegacySync();
                     const purged = this.purgeOldData();
                     if (purged > 0) this.showNotification(`🧹 已清除 ${purged} 個完成超過 30 天的任務`);
                     this.setupEventListeners();
-                    this.setupBackupListeners();
+                    this.setupSyncListeners();
                     this.updateUI();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
-                    this.autoImportFromSyncFolder();
+                    this._consumeSetupHash();
+                    this.cloud.start();
                 } catch (e) {
                     console.error('初始化失敗:', e);
                     this.showNotification('⚠️ 初始化失敗：' + e.message);
@@ -1546,30 +2242,153 @@
                     this.sortMode = sortModeJson ? JSON.parse(sortModeJson) : 'drag';
                     const showCompletedJson = localStorage.getItem('todoShowCompleted');
                     this.showCompleted = showCompletedJson !== null ? JSON.parse(showCompletedJson) : true;
+                    this.deletedTasks = lsReadJson('todoDeletedTasks', {});
                 } catch (e) {
                     console.error('載入數據失敗:', e);
                     this.showNotification('⚠️ 載入數據失敗');
                 }
+                try {
+                    this.deviceId = localStorage.getItem('todoDeviceId');
+                    if (!this.deviceId) {
+                        this.deviceId = genId();
+                        localStorage.setItem('todoDeviceId', this.deviceId);
+                    }
+                } catch (e) {
+                    this.deviceId = this.deviceId || genId();
+                }
+                this._rebuildFingerprints();
+            }
+
+            // 舊版（v6.2 以前）資料夾同步遺留：同步日期與 IndexedDB 中的資料夾 handle，v6.3 起已不使用
+            _cleanupLegacySync() {
+                try { localStorage.removeItem('todoSyncDate'); } catch (_) { /* ignore */ }
+                try { if (window.indexedDB) indexedDB.deleteDatabase('TodoMasterSync'); } catch (_) { /* ignore */ }
+            }
+
+            // ===== 變更偵測（雲端同步的基礎）=====
+            // 全站有 15 處 saveToStorage()，改為在這唯一出口比對指紋快照，就能知道哪些任務被新增/修改/刪除，
+            // 不必逐一修改各呼叫點：內容變動 → updatedAt；只有排序欄位變動 → 只蓋 orderAt；消失的 id → 寫入刪除標記。
+            _rebuildFingerprints() {
+                this._fpMap = new Map(this.tasks.map(t => [t.id, { c: taskContentFp(t), o: taskOrderFp(t) }]));
+                this._metaFp = stableStringify([this.tags, this.overdueLossLog]);
+            }
+
+            // 回傳「需要同步的資料」是否有變動（個人偏好如排序模式不算）
+            _stampChanges() {
+                const now = this.cloud ? this.cloud.now() : Date.now();
+                let changed = false;
+                const seen = new Set();
+                for (const t of this.tasks) {
+                    seen.add(t.id);
+                    const c = taskContentFp(t);
+                    const o = taskOrderFp(t);
+                    const prev = this._fpMap.get(t.id);
+                    if (!prev) {
+                        t.updatedAt = now;
+                        t.orderAt = now;
+                        changed = true;
+                    } else if (prev.c !== c) {
+                        t.updatedAt = now;
+                        if (prev.o !== o) t.orderAt = now;
+                        changed = true;
+                    } else if (prev.o !== o) {
+                        t.orderAt = now;
+                        changed = true;
+                    }
+                    if (!prev || prev.c !== c || prev.o !== o) this._fpMap.set(t.id, { c, o });
+                }
+                for (const id of [...this._fpMap.keys()]) {
+                    if (!seen.has(id)) {
+                        this._fpMap.delete(id);
+                        this.deletedTasks[id] = now;
+                        changed = true;
+                    }
+                }
+                const ttl = SYNC_TOMBSTONE_DAYS * 86400000;
+                for (const id of Object.keys(this.deletedTasks)) {
+                    if (now - this.deletedTasks[id] > ttl) delete this.deletedTasks[id];
+                }
+                const metaFp = stableStringify([this.tags, this.overdueLossLog]);
+                if (metaFp !== this._metaFp) {
+                    this._metaFp = metaFp;
+                    changed = true;
+                }
+                return changed;
+            }
+
+            _persist() {
+                localStorage.setItem('todoTasks', JSON.stringify(this.tasks));
+                localStorage.setItem('todoTags', JSON.stringify(this.tags));
+                localStorage.setItem('todoOverdueLossLog', JSON.stringify(this.overdueLossLog));
+                localStorage.setItem('todoDeletedTasks', JSON.stringify(this.deletedTasks));
+                localStorage.setItem('todoSortMode', JSON.stringify(this.sortMode));
+                localStorage.setItem('todoShowCompleted', JSON.stringify(this.showCompleted));
             }
 
             saveToStorage() {
                 try {
-                    localStorage.setItem('todoTasks', JSON.stringify(this.tasks));
-                    localStorage.setItem('todoTags', JSON.stringify(this.tags));
-                    localStorage.setItem('todoOverdueLossLog', JSON.stringify(this.overdueLossLog));
-                    localStorage.setItem('todoSortMode', JSON.stringify(this.sortMode));
-                    localStorage.setItem('todoShowCompleted', JSON.stringify(this.showCompleted));
-                    // 注意：todoSyncDate 僅在匯入/匯出同步時更新，不在一般存檔時覆蓋
+                    const changed = this._stampChanges();
+                    this._persist();
+                    if (changed && this.cloud) this.cloud.markDirty();
                 } catch (e) {
                     console.error('保存數據失敗:', e);
                     this.showNotification('⚠️ 保存數據失敗');
                 }
             }
 
+            // ===== 雲端同步 / 備份檔所需的狀態存取 =====
+            _exportState() {
+                return { tasks: this.tasks, tags: this.tags, overdueLossLog: this.overdueLossLog, deletedTasks: this.deletedTasks };
+            }
+
+            // 套用合併後的狀態：整份取代、重建指紋（不會被當成「使用者修改」而重新蓋時間戳）、寫入 localStorage、更新畫面
+            _applyState(state) {
+                this.tasks = state.tasks;
+                this.tags = state.tags;
+                this.overdueLossLog = state.overdueLossLog;
+                this.deletedTasks = state.deletedTasks;
+                this._rebuildFingerprints();
+                try {
+                    this._persist();
+                } catch (e) {
+                    console.error('保存數據失敗:', e);
+                    this.showNotification('⚠️ 保存數據失敗');
+                }
+                this.updateUI();
+            }
+
+            // 套用遠端資料前，先留一份本機快照（只保留最近一份），必要時可在主控台用 app.restorePreSyncBackup() 還原
+            _savePreSyncBackup(state) {
+                try {
+                    localStorage.setItem('todoPreSyncBackup', JSON.stringify({
+                        at: new Date().toISOString(),
+                        tasks: state.tasks,
+                        tags: state.tags,
+                        overdueLossLog: state.overdueLossLog,
+                        deletedTasks: state.deletedTasks
+                    }));
+                } catch (_) { /* 儲存空間不足時略過 */ }
+            }
+
+            restorePreSyncBackup() {
+                const b = lsReadJson('todoPreSyncBackup', null);
+                if (!b || !Array.isArray(b.tasks)) return false;
+                this._applyState(normalizeState(b));
+                if (this.cloud) this.cloud.markDirty();
+                return true;
+            }
+
+            // 「完成超過 30 天」的清除門檻日期（YYYY-MM-DD）
+            _purgeCutoffStr() {
+                const cutoff = new Date();
+                cutoff.setDate(cutoff.getDate() - 30);
+                return localDateStr(cutoff);
+            }
+
             // ===== 任務操作 =====
             addTask(taskData) {
                 const task = {
-                    id: Date.now().toString(),
+                    id: genId(),
                     ...taskData,
                     completed: false,
                     completedAt: null,
@@ -2566,7 +3385,7 @@
                     }
                 });
 
-                // 備份事件監聽已在 setupBackupListeners() 中設定
+                // 雲端同步／備份檔的事件監聽已在 setupSyncListeners() 中設定
 
 
 
@@ -3082,17 +3901,15 @@
             // 清除「完成日期」超過 30 天的已完成任務，以及 30 天前的逾期損失記錄，避免資料無限累積。
             // 由 init()（開 App 時）與 compressCompletedTasks()／壓縮鈕共用。回傳被清除的「任務」筆數。
             purgeOldData() {
-                const cutoff = new Date();
-                cutoff.setDate(cutoff.getDate() - 30);
-                const cutoffStr = localDateStr(cutoff);
+                const cutoffStr = this._purgeCutoffStr();
 
                 const beforeLen = this.tasks.length;
+                // 各裝置依同一規則各自清除（合併時也套用同一規則），因此清除不寫刪除標記：
+                // 從指紋快照拿掉這些 id，saveToStorage 就不會把它們當成「使用者刪除」
                 this.tasks = this.tasks.filter(t => {
-                    if (!t.completed) return true;
-                    const ref = t.completedDate
-                             || (t.completedAt ? t.completedAt.split('T')[0] : null)
-                             || t.date;
-                    return !ref || ref >= cutoffStr;
+                    if (!isPurgeableTask(t, cutoffStr)) return true;
+                    this._fpMap.delete(t.id);
+                    return false;
                 });
                 const removedTasks = beforeLen - this.tasks.length;
 
@@ -3219,279 +4036,164 @@
                 });
             }
 
-            // ===== 備份功能 (下載/上傳) =====
+            // ===== 備份檔（匯出／匯入 JSON；桌面與手機通用）=====
+            // 雲端同步是主要途徑；備份檔是離線保底，也能匯入 v6.2 以前的 todomaster-backup-*.json。
 
-            _buildBackupData() {
-                return {
+            exportBackupFile() {
+                const s = this._exportState();
+                const data = {
+                    schema: SYNC_SCHEMA,
                     version: APP_VERSION,
                     syncDate: new Date().toISOString(),
-                    tasks: this.tasks,
-                    tags: this.tags,
-                    overdueLossLog: this.overdueLossLog
+                    tasks: s.tasks,
+                    tags: s.tags,
+                    overdueLossLog: s.overdueLossLog,
+                    deletedTasks: s.deletedTasks
                 };
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `todomaster-backup-${localDateTimeStr()}.json`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                this.showNotification('✅ 備份檔已匯出');
             }
 
-            // ===== 同步資料夾功能 =====
+            // 匯入＝與目前資料「合併」（同一任務取較新者、不會清空現有資料）；套用前先留一份本機快照
+            async importBackupFile(file) {
+                try {
+                    const incoming = normalizeState(JSON.parse(await file.text()));
+                    const local = this._exportState();
+                    const merged = mergeStates(local, incoming, {
+                        now: this.cloud ? this.cloud.now() : Date.now(),
+                        purgeCutoff: this._purgeCutoffStr()
+                    });
+                    const n = countStateChanges(local, merged);
+                    this._savePreSyncBackup(local);
+                    this._applyState(merged);
+                    if (this.cloud) this.cloud.markDirty();
+                    this.showNotification(`✅ 已匯入並合併備份檔（新增/更新 ${n} 筆任務）`);
+                } catch (e) {
+                    console.error('[Backup] 匯入失敗:', e);
+                    this.showNotification('❌ 匯入失敗：' + (e instanceof SyncError ? e.message : '檔案不是有效的 TodoMaster 備份'));
+                }
+            }
 
-            async setSyncFolder() {
-                if (!window.showDirectoryPicker) {
-                    this.showNotification('❌ 此瀏覽器不支援資料夾存取，請使用 Chrome 或 Edge');
+            // ===== 雲端同步：設定畫面與事件 =====
+
+            // 「新裝置設定連結」(#sync=…) 開啟時：帶入設定並啟用同步；不論結果都立刻清掉網址上的 fragment（內含 Token）
+            _consumeSetupHash() {
+                const m = /^#sync=([A-Za-z0-9_-]+)$/.exec(location.hash || '');
+                if (!m) return;
+                try {
+                    history.replaceState(null, '', location.pathname + location.search);
+                } catch (_) {
+                    location.hash = '';
+                }
+                const cfg = decodeSetupPayload(m[1]);
+                if (!cfg) {
+                    this.showNotification('⚠️ 同步設定連結無效');
                     return;
                 }
-                try {
-                    const handle = await window.showDirectoryPicker({ mode: 'readwrite' });
-                    await saveDirHandle(handle);
-                    this.updateSyncFolderUI(handle.name);
-                    await this.autoImportFromSyncFolder(handle);
-                } catch (e) {
-                    if (e.name !== 'AbortError') {
-                        this.showNotification('❌ 設定同步資料夾失敗：' + e.message);
-                    }
-                }
+                const ok = confirm(`偵測到雲端同步設定連結：\n\nRepo：${cfg.owner}/${cfg.repo}\n\n要讓這台裝置的任務與此 repo 同步嗎？\n（若這不是你自己建立的連結，請按「取消」）`);
+                if (!ok) return;
+                this.cloud.connect(cfg)
+                    .then(() => this.showNotification('✅ 雲端同步已啟用'))
+                    .catch(e => alert('雲端同步設定失敗：' + (e && e.message ? e.message : e)));
             }
 
-            /**
-             * 取得有效且已授權的資料夾 handle（含自動修復）。
-             *
-             * 處理流程：
-             * 1. 從 IndexedDB 載入已存 handle
-             * 2. 若 handle 存在 → queryPermission
-             *    a. 'granted'       → 直接返回（最佳情況）
-             *    b. 'prompt'        → requestPermission（需使用者確認）
-             *       - granted → 返回
-             *       - denied  → 清除後走步驟 3
-             *    c. 'denied'        → 清除後走步驟 3
-             *    d. InvalidStateError（手機 session 失效）→ 清除後走步驟 3
-             * 3. 無有效 handle → 自動呼叫 showDirectoryPicker 讓使用者重新選擇
-             *    - 選擇成功 → 存入 IndexedDB，返回新 handle，繼續原操作
-             *    - 使用者取消 → 返回 null（靜默）
-             *
-             * @returns {FileSystemDirectoryHandle|null}
-             */
-            async _resolveWritableDirHandle() {
-                let handle = await loadDirHandle();
-
-                if (handle) {
-                    try {
-                        const perm = await handle.queryPermission({ mode: 'readwrite' });
-                        if (perm === 'granted') {
-                            return handle; // ✅ 有效且已授權，直接使用
-                        }
-                        if (perm === 'prompt') {
-                            // handle 有效但需重新授權（Android Chrome 常見於頁面重載後）
-                            const req = await handle.requestPermission({ mode: 'readwrite' });
-                            if (req === 'granted') return handle;
-                            // 使用者拒絕 → 清除後重選
-                            console.warn('[Sync] requestPermission 被拒絕，清除 handle');
-                            await clearDirHandle();
-                            this.updateSyncFolderUI(null);
-                        } else {
-                            // 'denied' → 清除後重選
-                            console.warn('[Sync] permission denied，清除 handle');
-                            await clearDirHandle();
-                            this.updateSyncFolderUI(null);
-                        }
-                    } catch (e) {
-                        if (e.name === 'InvalidStateError') {
-                            // handle 的內部 native 參照已失效（手機背景/重啟後常見）
-                            console.warn('[Sync] InvalidStateError，handle 失效，清除並重選:', e.message);
-                            await clearDirHandle();
-                            this.updateSyncFolderUI(null);
-                        } else {
-                            throw e; // 其他非預期錯誤往上拋
-                        }
-                    }
-                }
-
-                // 沒有有效 handle（初次、或失效被清除）→ 自動引導重選
-                if (!window.showDirectoryPicker) {
-                    this.showNotification('❌ 此瀏覽器不支援資料夾存取，請使用 Chrome 或 Edge');
-                    return null;
-                }
-
-                try {
-                    const newHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
-                    await saveDirHandle(newHandle);
-                    this.updateSyncFolderUI(newHandle.name);
-                    console.log('[Sync] 重新選擇資料夾成功:', newHandle.name);
-                    return newHandle;
-                } catch (e) {
-                    if (e.name !== 'AbortError') {
-                        console.error('[Sync] showDirectoryPicker 失敗:', e.name, e.message);
-                        this.showNotification('❌ 無法開啟資料夾選擇器：' + e.message);
-                    }
-                    return null;
-                }
+            openSyncModal() {
+                const c = this.cloud;
+                const $ = id => document.getElementById(id);
+                $('syncOwner').value = (c.cfg && c.cfg.owner) || '';
+                $('syncRepo').value = (c.cfg && c.cfg.repo) || '';
+                $('syncToken').value = '';
+                $('syncToken').required = !c.configured;
+                $('syncToken').placeholder = c.configured ? '（已儲存；留空表示沿用目前的 Token）' : 'github_pat_…';
+                $('syncFormMsg').textContent = '';
+                $('syncFormMsg').className = 'sync-msg';
+                $('syncDisconnectBtn').style.display = c.configured ? '' : 'none';
+                const link = c.buildSetupLink();
+                $('syncLinkBox').style.display = link ? '' : 'none';
+                $('syncLinkText').value = link;
+                this.openModal('syncModal');
             }
 
-            async getLatestBackupFile(handle) {
-                let latest = null;
-                for await (const entry of handle.values()) {
-                    if (entry.kind !== 'file') continue;
-                    if (!entry.name.startsWith('todomaster-backup-') || !entry.name.endsWith('.json')) continue;
-                    const file = await entry.getFile();
-                    try {
-                        const text = await file.text();
-                        const data = JSON.parse(text);
-                        if (!data.tasks || !Array.isArray(data.tasks)) continue;
-                        if (!latest || new Date(data.syncDate) > new Date(latest.data.syncDate)) {
-                            latest = { file, data };
-                        }
-                    } catch (e) { /* 跳過損毀檔案 */ }
-                }
-                return latest;
-            }
+            setupSyncListeners() {
+                const $ = id => document.getElementById(id);
+                const cloud = this.cloud;
 
-            _applyBackupData(latest) {
-                this.tasks = latest.data.tasks;
-                this.tags = latest.data.tags || [];
-                this.overdueLossLog = latest.data.overdueLossLog || [];
-                this.saveToStorage();
-                this.updateUI();
-            }
-
-            async autoImportFromSyncFolder(handleOverride) {
-                try {
-                    // 啟動時靜默同步：使用傳入的 handle（初次設定）或從 IndexedDB 載入
-                    // 注意：此處「不」呼叫 showDirectoryPicker，避免啟動時彈出選擇器
-                    let handle = handleOverride || await loadDirHandle();
-                    if (!handle) return;
-
-                    let perm;
-                    try {
-                        perm = await handle.queryPermission({ mode: 'readwrite' });
-                    } catch (e) {
-                        if (e.name === 'InvalidStateError') {
-                            // 手機 session 重啟後 handle 失效：靜默清除，不打擾使用者
-                            // 使用者下次點「匯出/匯入同步」時會自動引導重新選擇
-                            console.warn('[Sync] 啟動自動同步：handle 失效，已清除，等待使用者觸發同步');
-                            await clearDirHandle();
-                            this.updateSyncFolderUI(null);
-                            return;
-                        }
-                        throw e;
-                    }
-
-                    if (perm !== 'granted') return; // 啟動時不強迫授權
-
-                    this.updateSyncFolderUI(handle.name);
-
-                    const latest = await this.getLatestBackupFile(handle);
-                    if (!latest) return;
-
-                    const localSyncDate = localStorage.getItem('todoSyncDate');
-                    const backupDate = new Date(latest.data.syncDate);
-                    const localDate = localSyncDate ? new Date(localSyncDate) : new Date(0);
-
-                    if (backupDate > localDate) {
-                        this._applyBackupData(latest);
-                        const dateStr = backupDate.toLocaleDateString('zh-TW');
-                        this.showNotification(`✅ 已同步最新資料（${dateStr}）`);
-                    }
-                } catch (e) {
-                    console.warn('[Sync] 啟動自動同步失敗:', e);
-                }
-            }
-
-            async manualImportFromSyncFolder() {
-                try {
-                    // _resolveWritableDirHandle 自動處理：失效偵測 → 清除 → 重選 → 繼續
-                    const handle = await this._resolveWritableDirHandle();
-                    if (!handle) return;
-
-                    this.updateSyncFolderUI(handle.name);
-
-                    const latest = await this.getLatestBackupFile(handle);
-                    if (!latest) {
-                        this.showNotification('❌ 同步資料夾中無備份檔案');
+                $('cloudSyncNowBtn').addEventListener('click', async () => {
+                    if (!cloud.configured) {
+                        this.openSyncModal();
                         return;
                     }
-
-                    const localSyncDate = localStorage.getItem('todoSyncDate');
-                    const backupDate = new Date(latest.data.syncDate);
-                    const localDate = localSyncDate ? new Date(localSyncDate) : new Date(0);
-
-                    if (backupDate <= localDate) {
-                        this.showNotification('✅ 本地已是最新同步版本');
-                        return;
-                    }
-
-                    const dateStr = backupDate.toLocaleString('zh-TW');
-                    this._applyBackupData(latest);
-                    localStorage.setItem('todoSyncDate', latest.data.syncDate);
-                    this.showNotification(`✅ 已匯入同步資料（${dateStr}）`);
-                } catch (e) {
-                    if (e.name !== 'AbortError') {
-                        console.error('[Sync] manualImportFromSyncFolder 未預期錯誤:', e);
-                        this.showNotification('❌ 匯入同步失敗：' + e.message);
-                    }
-                }
-            }
-
-            async exportToSyncFolder() {
-                const data = this._buildBackupData();
-                const json = JSON.stringify(data, null, 2);
-                const blob = new Blob([json], { type: 'application/json' });
-                const filename = `todomaster-backup-${localDateTimeStr()}.json`;
-
-                try {
-                    if (window.showSaveFilePicker) {
-                        // 使用 OS 存檔對話框（預設開啟同步資料夾）：
-                        // 不預先建立空白檔案，完全避免雲端同步服務的鎖定競爭
-                        const dirHandle = await loadDirHandle();
-                        const saveHandle = await window.showSaveFilePicker({
-                            suggestedName: filename,
-                            startIn: dirHandle || 'downloads',
-                            types: [{ description: 'JSON 備份', accept: { 'application/json': ['.json'] } }]
-                        });
-                        const writable = await saveHandle.createWritable();
-                        try {
-                            await writable.write(blob);
-                            await writable.close();
-                        } catch (writeErr) {
-                            try { await writable.abort(); } catch (_) {}
-                            throw writeErr;
-                        }
+                    await cloud.syncNow('manual');
+                    if (cloud.state === 'idle') {
+                        if (cloud.lastApplied === 0) this.showNotification('✅ 已是最新');
                     } else {
-                        // 降級：不支援 showSaveFilePicker 時直接觸發瀏覽器下載
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = filename;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        URL.revokeObjectURL(url);
+                        this.showNotification('⚠️ ' + (cloud.message || (cloud.state === 'offline' ? '目前離線，恢復連線後自動同步' : '同步未完成')));
                     }
-                    localStorage.setItem('todoSyncDate', data.syncDate);
-                    this.showNotification('✅ 備份已匯出至同步資料夾');
-                } catch (e) {
-                    if (e.name !== 'AbortError') {
-                        console.error('[Sync] exportToSyncFolder 失敗:', e);
-                        this.showNotification('❌ 匯出失敗：' + e.message);
+                });
+                $('cloudSyncSetupBtn').addEventListener('click', () => this.openSyncModal());
+
+                $('syncForm').addEventListener('submit', async e => {
+                    e.preventDefault();
+                    const owner = $('syncOwner').value.trim();
+                    const repo = $('syncRepo').value.trim();
+                    const token = $('syncToken').value.trim() || (cloud.cfg && cloud.cfg.token) || '';
+                    const msg = $('syncFormMsg');
+                    const fail = text => {
+                        msg.textContent = text;
+                        msg.className = 'sync-msg err';
+                    };
+                    if (!SYNC_SAFE_NAME.test(owner) || !SYNC_SAFE_NAME.test(repo)) return fail('帳號或 repo 名稱格式不正確');
+                    if (!token) return fail('請貼上 Token');
+                    const btn = $('syncSaveBtn');
+                    btn.disabled = true;
+                    msg.textContent = '連線測試與首次同步中…';
+                    msg.className = 'sync-msg';
+                    try {
+                        await cloud.connect({ owner, repo, token });
+                        $('syncToken').value = '';
+                        closeModal('syncModal');
+                        this.showNotification('✅ 雲端同步已啟用');
+                    } catch (err) {
+                        fail(err && err.message ? err.message : '連線失敗');
+                    } finally {
+                        btn.disabled = false;
                     }
-                }
-            }
+                });
 
-            updateSyncFolderUI(folderName) {
-                const el = document.getElementById('syncFolderName');
-                if (el) el.textContent = folderName || '未設定';
-            }
+                $('syncDisconnectBtn').addEventListener('click', () => {
+                    if (!confirm('要中斷雲端同步嗎？\n本機資料會保留，之後可隨時重新連線。')) return;
+                    cloud.disconnect();
+                    closeModal('syncModal');
+                    this.showNotification('已中斷雲端同步');
+                });
 
-            setupBackupListeners() {
-                const setSyncBtn = document.getElementById('setSyncFolderBtn');
-                const exportSyncBtn = document.getElementById('exportSyncBtn');
+                $('syncCopyLinkBtn').addEventListener('click', async () => {
+                    const box = $('syncLinkText');
+                    try {
+                        await navigator.clipboard.writeText(box.value);
+                        this.showNotification('✅ 已複製連結（含 Token，請勿公開）');
+                    } catch (_) {
+                        box.select();
+                        document.execCommand('copy');
+                        this.showNotification('已選取連結，請自行複製');
+                    }
+                });
 
-                if (setSyncBtn) {
-                    setSyncBtn.addEventListener('click', () => this.setSyncFolder());
-                }
-                if (exportSyncBtn) {
-                    exportSyncBtn.addEventListener('click', () => this.exportToSyncFolder());
-                }
-                const importSyncBtn = document.getElementById('importSyncBtn');
-                if (importSyncBtn) {
-                    importSyncBtn.addEventListener('click', () => this.manualImportFromSyncFolder());
-                }
+                $('exportFileBtn').addEventListener('click', () => this.exportBackupFile());
+                $('importFileBtn').addEventListener('click', () => $('importFileInput').click());
+                $('importFileInput').addEventListener('change', async e => {
+                    const file = e.target.files && e.target.files[0];
+                    e.target.value = '';
+                    if (file) await this.importBackupFile(file);
+                });
             }
 
             renderStats(period) {
@@ -3786,7 +4488,7 @@
 
                 const newTask = {
                     ...JSON.parse(JSON.stringify(originalTask)),
-                    id: Date.now().toString(),
+                    id: genId(),
                     title: `${originalTask.title} (副本)`,
                     completed: false,
                     completedAt: null,
@@ -4085,21 +4787,6 @@
         document.addEventListener('DOMContentLoaded', () => {
             app = new TodoApp();
         });
-    </script>
-    <script>
-    // Android 降級：File System Access API 不支援時隱藏同步資料夾 UI
-    (function() {
-      if (typeof window.showOpenFilePicker === 'function') return;
-      document.addEventListener('DOMContentLoaded', function() {
-        const syncBtn = document.getElementById('setSyncFolderBtn');
-        if (!syncBtn) return;
-        const notice = document.createElement('div');
-        notice.style.cssText = 'font-size:0.78rem;color:var(--text-secondary);padding:6px 0 10px;line-height:1.6;';
-        notice.textContent = '📱 行動裝置不支援資料夾同步，請使用下方手動備份。';
-        syncBtn.parentElement.insertBefore(notice, syncBtn);
-        syncBtn.style.display = 'none';
-      });
-    })();
     </script>
 </body>
 </html>
