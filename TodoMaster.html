@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.3.4 - 任務管理工具</title>
+    <title>TodoMaster v6.4 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -203,6 +203,37 @@
             gap: 8px;
             align-items: center;
         }
+
+        /* 任務名稱搜尋 */
+        .task-search {
+            position: relative;
+            flex: 1 1 220px;
+            max-width: 360px;
+        }
+        .task-search input {
+            width: 100%;
+            padding: 8px 32px 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+        .task-search input:focus { outline: none; border-color: var(--accent-primary); }
+        .task-search input::-webkit-search-cancel-button { display: none; }
+        .task-search-clear {
+            position: absolute;
+            right: 4px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px 8px;
+            font-size: 0.85rem;
+        }
+        .task-search-clear:hover { color: var(--text-primary); }
 
         .date-display {
             font-size: 0.95rem;
@@ -404,7 +435,21 @@
             align-items: center;
             gap: 6px;
             user-select: none;
+            cursor: pointer;
         }
+        .time-section-header:hover { color: var(--text-primary); }
+        .time-section-header:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
+        .section-chevron {
+            display: inline-block;
+            width: 1em;
+            text-align: center;
+            transition: transform 0.15s;
+        }
+        /* 收合：只留標題；搜尋中一律展開，避免符合的任務被藏起來 */
+        .time-section.collapsed .section-chevron { transform: rotate(-90deg); }
+        .time-section.collapsed > :not(.time-section-header) { display: none; }
+        #taskList.searching .time-section.collapsed > :not(.time-section-header) { display: block; }
+        #taskList.searching .time-section.collapsed .section-chevron { transform: none; }
         .section-time-total {
             font-size: 0.72rem;
             font-weight: 400;
@@ -806,6 +851,12 @@
                 padding: 12px 16px;
             }
 
+            .task-search {
+                order: 3;
+                flex-basis: 100%;
+                max-width: none;
+            }
+
             .task-item {
                 grid-template-columns: 1fr;
             }
@@ -883,7 +934,7 @@
             resize: vertical;
         }
 
-        /* 整理重複任務 */
+        /* 衝突視窗的任務卡片 */
         .dup-group {
             border: 1px solid var(--bg-tertiary);
             border-radius: 8px;
@@ -891,21 +942,6 @@
             margin-bottom: 10px;
         }
         .dup-title { font-weight: 600; margin-bottom: 6px; word-break: break-word; }
-        .dup-title small { color: var(--text-secondary); font-weight: 400; }
-        .dup-date { white-space: nowrap; }
-        .dup-row {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 4px 10px;
-            padding: 4px 0;
-            font-size: 0.9rem;
-            line-height: 1.5;
-        }
-        .dup-row.keep { color: var(--accent-success); }
-        .dup-row input { accent-color: var(--accent-primary); cursor: pointer; flex-shrink: 0; }
-        label.dup-row { cursor: pointer; }
-        .dup-tag { color: var(--accent-secondary); }
         .dup-note { color: var(--text-secondary); }
 
         /* 匯入備份檔視窗 */
@@ -984,7 +1020,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.3.4';
+        const APP_VERSION = 'v6.4';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1113,10 +1149,6 @@
                     <span class="filter-icon">📦</span>
                     壓縮任務
                 </button>
-                <button class="filter-item" id="dedupeBtn">
-                    <span class="filter-icon">🧹</span>
-                    整理重複任務
-                </button>
             </div>
 
             <div class="sidebar-section">
@@ -1181,6 +1213,10 @@
                     </button>
                     <div class="date-display" id="dateDisplay"></div>
                     <span id="versionDisplay" style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.6; margin-left: 8px; font-family: monospace;"></span>
+                </div>
+                <div class="task-search">
+                    <input type="search" id="taskSearchInput" placeholder="🔍 搜尋任務名稱…" aria-label="搜尋任務名稱" autocomplete="off">
+                    <button type="button" class="task-search-clear" id="taskSearchClear" title="清除搜尋" aria-label="清除搜尋" hidden>✕</button>
                 </div>
                 <div class="top-bar-right">
                     <button class="btn btn-primary" id="addTaskBtn">+ 新增任務</button>
@@ -1520,22 +1556,6 @@
                 <button type="button" class="btn btn-secondary" id="syncCopyLinkBtn" style="margin-top: 8px;">
                     📋 複製連結
                 </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 整理重複任務模態框 -->
-    <div class="modal" id="dedupeModal">
-        <div class="modal-content" style="max-width: 560px;">
-            <div class="modal-header">🧹 整理重複任務</div>
-            <div class="sync-help" id="dedupeSummary"></div>
-            <div id="dedupeList"></div>
-            <div class="sync-help" style="margin: 12px 0 0;">
-                刪除前會先備份本機資料；刪除會同步到其他裝置。若已連線雲端同步，也可到 GitHub 的 commit 歷史還原。
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" onclick="closeModal('dedupeModal')">取消</button>
-                <button type="button" class="btn btn-primary" id="dedupeConfirmBtn">刪除勾選的</button>
             </div>
         </div>
     </div>
@@ -2047,68 +2067,6 @@
             return null;
         }
         // SYNC-CORE-END
-
-        // DEDUPE-BEGIN
-        // ===== 重複任務偵測（純函式，可單獨測試）=====
-        // 迴圈任務完成時會自動建立「下一次」（新 id）。兩台裝置各自完成同一個任務、或舊資料與新資料合併後，
-        // 同一個任務就可能同時存在多份「未完成」的副本；這裡把它們找出來，只保留最新的一份。
-        const DUP_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-        function dupDaysBetween(fromStr, toStr) {
-            return Math.round((Date.parse(toStr + 'T00:00:00Z') - Date.parse(fromStr + 'T00:00:00Z')) / 86400000);
-        }
-
-        function dupCompareRank(a, b) {
-            for (let i = 0; i < a.length; i++) {
-                if (a[i] < b[i]) return -1;
-                if (a[i] > b[i]) return 1;
-            }
-            return 0;
-        }
-
-        /**
-         * 找出重複的「未完成」迴圈／群組任務。
-         * - 只看：未完成、未壓縮、有具體日期、且是迴圈任務或群組任務（一般單次任務同名不算重複；暫存與不限期不比較）
-         * - 「同一個任務」＝ 標題（去頭尾空白）＋分類＋群組 都相同
-         * - 已完成的不列入：迴圈任務每一次完成都是一筆歷史紀錄，本來就會有很多筆
-         * - 保留優先序：日期較晚 > 已完成次數較多 > 較晚修改 > id（保證任何順序、任何裝置都選出同一份）
-         * - 預設勾選刪除：已逾期的較早份，或與保留者「同一次」（日期與完成次數皆相同）的完全重複份
-         */
-        function findDuplicateGroups(tasks, todayStr) {
-            const buckets = new Map();
-            for (const t of tasks) {
-                if (!t || t.completed || t.compressed) continue;
-                const recurring = !!(t.recurring && t.recurring.enabled);
-                if (!recurring && !t.groupId) continue;
-                if (!DUP_DATE_RE.test(t.date || '') || t.date === '9999-12-31') continue;
-                const key = [String(t.title || '').trim(), t.category || '', t.groupId || ''].join('\u0001');
-                if (!buckets.has(key)) buckets.set(key, []);
-                buckets.get(key).push(t);
-            }
-            const countOf = t => (t.recurring && t.recurring.completedCount) || 0;
-            const rankOf = t => [t.date, countOf(t), t.updatedAt || 0, String(t.id)];
-            const groups = [];
-            for (const list of buckets.values()) {
-                if (list.length < 2) continue;
-                const sorted = [...list].sort((a, b) => dupCompareRank(rankOf(b), rankOf(a)));
-                const keep = sorted[0];
-                const remove = sorted.slice(1).map(t => {
-                    const overdue = t.date < todayStr;
-                    const sameOccurrence = t.date === keep.date && countOf(t) === countOf(keep);
-                    return {
-                        task: t,
-                        overdue,
-                        overdueDays: overdue ? dupDaysBetween(t.date, todayStr) : 0,
-                        sameOccurrence,
-                        checked: overdue || sameOccurrence
-                    };
-                });
-                groups.push({ title: String(keep.title || '').trim(), groupName: keep.groupName || '', keep, remove });
-            }
-            groups.sort((a, b) => (a.title < b.title ? -1 : a.title > b.title ? 1 : String(a.keep.id) < String(b.keep.id) ? -1 : 1));
-            return groups;
-        }
-        // DEDUPE-END
 
         // ===== 傳輸層：GitHub Contents API =====
         // 樂觀並發：PUT 需帶目前檔案的 blob sha，過期回 409（缺 sha 回 422）→ 上層重新拉取、合併、重試。
@@ -2657,6 +2615,10 @@
                 this.currentFilter = 'all';
                 this.sortMode = 'drag'; // 'drag' 或 'fixed'
                 this.showCompleted = true;
+                this.searchQuery = '';    // 任務名稱搜尋關鍵字（不保存，重開 App 清空）
+                // 首頁收合的分區 key（staging/overdue/today/...）：單機介面偏好，不進任務資料、雲端同步與備份檔
+                const collapsed = lsReadJson('todoCollapsedSections', []);
+                this.collapsedSections = new Set(Array.isArray(collapsed) ? collapsed : []);
                 this.currentEditingTask = null;
 
 
@@ -2916,6 +2878,12 @@
                     filtered = filtered.filter(t => !isStagedTask(t));
                 }
 
+                // 名稱搜尋：只比對標題，不分大小寫，疊加在目前視圖篩選之上
+                const q = this.searchQuery.trim().toLowerCase();
+                if (q) {
+                    filtered = filtered.filter(t => String(t.title || '').toLowerCase().includes(q));
+                }
+
                 if (!this.showCompleted) {
                     filtered = filtered.filter(t => !t.completed);
                 }
@@ -3015,9 +2983,12 @@
                 const emptyState = document.getElementById('emptyState');
 
                 const filtered = this.getFilteredTasks();
+                const query = this.searchQuery.trim();
+                taskList.classList.toggle('searching', !!query);
 
                 if (filtered.length === 0) {
                     taskList.innerHTML = '';
+                    emptyState.querySelector('.empty-state-text').textContent = query ? `找不到名稱含「${query}」的任務` : '沒有任務';
                     emptyState.style.display = 'flex';
                     return;
                 }
@@ -3069,7 +3040,7 @@
                         <ol class="task-list section-task-list" id="taskList-staging"></ol>
                     </div>
                     <div class="time-section" id="section-overdue" data-section="overdue">
-                        <div class="time-section-header">⚠️ 逾期
+                        <div class="time-section-header">⚠️ 逾期<span class="section-time-total" id="section-overdue-count"></span>
                             <button class="reschedule-all-btn" id="rescheduleAllBtn">📅 全部重新安排到今天</button>
                         </div>
                         <ol class="task-list section-task-list" id="taskList-overdue"></ol>
@@ -3087,10 +3058,30 @@
                         ${this._periodBlocksHtml('dayafter')}
                     </div>
                     <div class="time-section" id="section-later" data-section="later">
-                        <div class="time-section-header">🗓️ 更久以後</div>
+                        <div class="time-section-header">🗓️ 更久以後<span class="section-time-total" id="section-later-count"></span></div>
                         <ol class="task-list section-task-list" id="taskList-later"></ol>
                     </div>
                 `;
+
+                // 分區標題可點擊（或 Enter／空白鍵）收合／展開；收合狀態記在本機
+                document.querySelectorAll('#taskList .time-section').forEach(section => {
+                    const header = section.querySelector('.time-section-header');
+                    const collapsed = this.collapsedSections.has(section.dataset.section);
+                    section.classList.toggle('collapsed', collapsed);
+                    header.insertAdjacentHTML('afterbegin', '<span class="section-chevron" aria-hidden="true">▾</span>');
+                    header.setAttribute('role', 'button');
+                    header.setAttribute('tabindex', '0');
+                    header.setAttribute('aria-expanded', String(!collapsed));
+                    header.addEventListener('click', e => {
+                        if (e.target.closest('button')) return;   // 標題內的按鈕（全部重新安排到今天）不觸發收合
+                        this.toggleSection(section);
+                    });
+                    header.addEventListener('keydown', e => {
+                        if (e.target !== header || (e.key !== 'Enter' && e.key !== ' ')) return;
+                        e.preventDefault();
+                        this.toggleSection(section);
+                    });
+                });
 
                 const periodMap = dayKey => ({
                     morning: document.getElementById(`taskList-${dayKey}-morning`),
@@ -3122,6 +3113,19 @@
                 }
 
                 return sections;
+            }
+
+            // 切換單一分區的收合狀態（只改 class，不重繪整個清單）
+            toggleSection(section) {
+                const key = section.dataset.section;
+                const collapsed = !section.classList.contains('collapsed');
+                section.classList.toggle('collapsed', collapsed);
+                section.querySelector('.time-section-header').setAttribute('aria-expanded', String(!collapsed));
+                if (collapsed) this.collapsedSections.add(key);
+                else this.collapsedSections.delete(key);
+                try {
+                    localStorage.setItem('todoCollapsedSections', JSON.stringify([...this.collapsedSections]));
+                } catch (_) { /* 無法寫入時僅本次有效 */ }
             }
 
             // 今天／明天／後天分區的已預定 / 已完成分鐘數（一律以 this.tasks 計算，不受顯示/隱藏已完成影響）
@@ -3373,11 +3377,14 @@
                     if (el) el.textContent = t.total > 0 ? `（已預定${formatDuration(t.total)}，完成${formatDuration(t.completed)}，剩餘${formatDuration(t.total - t.completed)}）` : '';
                 });
 
-                const stagingCountEl = document.getElementById('section-staging-count');
-                if (stagingCountEl && sections.staging) {
-                    const n = sections.staging.children.length;
-                    stagingCountEl.textContent = n > 0 ? `（${n} 項）` : '';
-                }
+                // 暫存區／逾期／更久以後：顯示項目數（收合時也看得到裡面有多少）
+                ['staging', 'overdue', 'later'].forEach(sec => {
+                    const countEl = document.getElementById(`section-${sec}-count`);
+                    if (countEl && sections[sec]) {
+                        const n = sections[sec].children.length;
+                        countEl.textContent = n > 0 ? `（${n} 項）` : '';
+                    }
+                });
 
                 // 區塊無任務時隱藏
                 ['staging', 'overdue', 'later'].forEach(sec => {
@@ -3556,6 +3563,27 @@
 
             // ===== 事件設置 =====
             setupEventListeners() {
+                // 任務名稱搜尋：即時過濾（只重繪任務清單，統計卡不受影響）；Esc 或 ✕ 清空
+                const searchInput = document.getElementById('taskSearchInput');
+                const searchClear = document.getElementById('taskSearchClear');
+                const setSearch = value => {
+                    this.searchQuery = value;
+                    searchClear.hidden = !value;
+                    this.renderTasks();
+                };
+                searchInput.addEventListener('input', () => setSearch(searchInput.value));
+                searchInput.addEventListener('keydown', e => {
+                    if (e.key !== 'Escape') return;
+                    e.preventDefault();
+                    searchInput.value = '';
+                    setSearch('');
+                });
+                searchClear.addEventListener('click', () => {
+                    searchInput.value = '';
+                    setSearch('');
+                    searchInput.focus();
+                });
+
                 // 新增任務
                 document.getElementById('addTaskBtn').addEventListener('click', () => {
                     this.currentEditingTask = null;
@@ -3715,11 +3743,6 @@
 
                         if (targetId === 'statsBtn') {
                             this.openStatsModal();
-                            return;
-                        }
-
-                        if (targetId === 'dedupeBtn') {
-                            this.openDedupeModal();
                             return;
                         }
 
@@ -4749,58 +4772,6 @@
                 document.getElementById('conflictLaterBtn').onclick = () => finish(() => opts.onLater());
                 modal.onclick = e => { if (e.target === modal) finish(() => opts.onLater()); };   // 點視窗外＝稍後再說
                 this.openModal('conflictModal');
-            }
-
-            // ===== 整理重複任務 =====
-            // 先做一次雲端同步（讓這台看到的是各裝置合併後的完整資料），再列出重複的任務供勾選刪除。
-            async openDedupeModal() {
-                if (this.cloud && this.cloud.configured) await this.cloud.syncNow('manual');
-                if (this.cloud && this.cloud.state === 'conflict') return;   // 有衝突尚未處理：資料還沒合併完成，先處理衝突再整理重複
-                const groups = findDuplicateGroups(this.tasks, localDateStr());
-                if (groups.length === 0) {
-                    this.showNotification('✅ 沒有找到重複的任務');
-                    return;
-                }
-                const esc = s => this.escapeHtml(String(s));
-                const rows = groups.map(g => {
-                    const keepHtml = `<div class="dup-row keep"><span>✅ 保留</span><span class="dup-date">${esc(g.keep.date)}</span>${g.keep.date < localDateStr() ? '<span>（已逾期）</span>' : ''}</div>`;
-                    const removeHtml = g.remove.map(r => {
-                        const why = r.overdue
-                            ? `<span class="dup-tag">逾期 ${r.overdueDays} 天</span>`
-                            : r.sameOccurrence
-                                ? '<span class="dup-tag">與保留的是同一次（完全重複）</span>'
-                                : '<span class="dup-note">尚未逾期，預設不刪</span>';
-                        return `<label class="dup-row"><input type="checkbox" data-dup-id="${esc(r.task.id)}"${r.checked ? ' checked' : ''}><span>🗑️ 刪除</span><span class="dup-date">${esc(r.task.date)}</span>${why}</label>`;
-                    }).join('');
-                    const sub = g.groupName ? ` <small>· 群組：${esc(g.groupName)}</small>` : '';
-                    return `<div class="dup-group"><div class="dup-title">🔁 ${esc(g.title)}${sub}</div>${keepHtml}${removeHtml}</div>`;
-                }).join('');
-                document.getElementById('dedupeList').innerHTML = rows;
-                const total = groups.reduce((n, g) => n + g.remove.length, 0);
-                document.getElementById('dedupeSummary').textContent =
-                    `找到 ${groups.length} 個重複的任務（共 ${total} 份較早的副本）。每個任務只保留日期最晚的一份；已逾期或完全重複的副本已預設勾選，可自行取消勾選。`;
-                const list = document.getElementById('dedupeList');
-                const btn = document.getElementById('dedupeConfirmBtn');
-                const refresh = () => {
-                    const n = list.querySelectorAll('input[data-dup-id]:checked').length;
-                    btn.textContent = `刪除勾選的（${n}）`;
-                    btn.disabled = n === 0;
-                };
-                list.onchange = refresh;
-                btn.onclick = () => this.confirmDedupe();
-                refresh();
-                this.openModal('dedupeModal');
-            }
-
-            confirmDedupe() {
-                const ids = new Set([...document.querySelectorAll('#dedupeList input[data-dup-id]:checked')].map(el => el.dataset.dupId));
-                if (ids.size === 0) return;
-                this._savePreSyncBackup(this._exportState());   // 刪除前先留一份本機快照（app.restorePreSyncBackup() 可還原）
-                this.tasks = this.tasks.filter(t => !ids.has(String(t.id)));
-                this.saveToStorage();                            // 消失的 id 會被記成刪除標記，隨雲端同步傳到其他裝置
-                closeModal('dedupeModal');
-                this.updateUI();
-                this.showNotification(`🧹 已刪除 ${ids.size} 份重複任務`);
             }
 
             // ===== 雲端同步：設定畫面與事件 =====
