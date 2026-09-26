@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.4 - 任務管理工具</title>
+    <title>TodoMaster v6.4.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -445,11 +445,17 @@
             text-align: center;
             transition: transform 0.15s;
         }
-        /* 收合：只留標題；搜尋中一律展開，避免符合的任務被藏起來 */
-        .time-section.collapsed .section-chevron { transform: rotate(-90deg); }
-        .time-section.collapsed > :not(.time-section-header) { display: none; }
-        #taskList.searching .time-section.collapsed > :not(.time-section-header) { display: block; }
-        #taskList.searching .time-section.collapsed .section-chevron { transform: none; }
+        /* 收合（分區與早上／下午／晚上時段）：只留標題；搜尋中一律展開，避免符合的任務被藏起來 */
+        .collapsed > .time-section-header > .section-chevron,
+        .collapsed > .period-header > .section-chevron { transform: rotate(-90deg); }
+        .time-section.collapsed > :not(.time-section-header),
+        .period-group.collapsed > :not(.period-header) { display: none; }
+        #taskList.searching .time-section.collapsed > :not(.time-section-header),
+        #taskList.searching .period-group.collapsed > :not(.period-header) { display: block; }
+        #taskList.searching .collapsed .section-chevron { transform: none; }
+        .period-header { cursor: pointer; }
+        .period-header:hover { opacity: 1; }
+        .period-header:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }
         .section-time-total {
             font-size: 0.72rem;
             font-weight: 400;
@@ -851,9 +857,11 @@
                 padding: 12px 16px;
             }
 
+            /* 手機：第一列側欄鈕＋日期；第二列搜尋框與「新增任務」並排 */
+            .top-bar-left { flex-basis: 100%; }
             .task-search {
-                order: 3;
-                flex-basis: 100%;
+                flex: 1 1 0;
+                min-width: 0;
                 max-width: none;
             }
 
@@ -1020,7 +1028,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.4';
+        const APP_VERSION = 'v6.4.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -3025,7 +3033,7 @@
             // 單日分區內的早上/下午/晚上三段子清單 HTML（今天/明天/後天共用）
             _periodBlocksHtml(dayKey) {
                 return PERIOD_ORDER.map(period => `
-                    <div class="period-group" data-period="${period}">
+                    <div class="period-group" data-period="${period}" data-collapse-key="${dayKey}-${period}">
                         <div class="period-header">${PERIOD_LABELS[period]}</div>
                         <ol class="task-list section-task-list" id="taskList-${dayKey}-${period}" data-period="${period}"></ol>
                     </div>
@@ -3063,10 +3071,11 @@
                     </div>
                 `;
 
-                // 分區標題可點擊（或 Enter／空白鍵）收合／展開；收合狀態記在本機
-                document.querySelectorAll('#taskList .time-section').forEach(section => {
-                    const header = section.querySelector('.time-section-header');
-                    const collapsed = this.collapsedSections.has(section.dataset.section);
+                // 分區標題與早上／下午／晚上時段標題可點擊（或 Enter／空白鍵）收合／展開；收合狀態記在本機
+                document.querySelectorAll('#taskList .time-section').forEach(s => { s.dataset.collapseKey = s.dataset.section; });
+                document.querySelectorAll('#taskList [data-collapse-key]').forEach(section => {
+                    const header = section.querySelector(':scope > .time-section-header, :scope > .period-header');
+                    const collapsed = this.collapsedSections.has(section.dataset.collapseKey);
                     section.classList.toggle('collapsed', collapsed);
                     header.insertAdjacentHTML('afterbegin', '<span class="section-chevron" aria-hidden="true">▾</span>');
                     header.setAttribute('role', 'button');
@@ -3115,12 +3124,12 @@
                 return sections;
             }
 
-            // 切換單一分區的收合狀態（只改 class，不重繪整個清單）
+            // 切換單一分區或時段的收合狀態（只改 class，不重繪整個清單）
             toggleSection(section) {
-                const key = section.dataset.section;
+                const key = section.dataset.collapseKey;
                 const collapsed = !section.classList.contains('collapsed');
                 section.classList.toggle('collapsed', collapsed);
-                section.querySelector('.time-section-header').setAttribute('aria-expanded', String(!collapsed));
+                section.querySelector(':scope > .time-section-header, :scope > .period-header').setAttribute('aria-expanded', String(!collapsed));
                 if (collapsed) this.collapsedSections.add(key);
                 else this.collapsedSections.delete(key);
                 try {
@@ -3374,7 +3383,7 @@
                     { id: 'section-dayafter-total', t: totals.dayafter }
                 ].forEach(({ id, t }) => {
                     const el = document.getElementById(id);
-                    if (el) el.textContent = t.total > 0 ? `（已預定${formatDuration(t.total)}，完成${formatDuration(t.completed)}，剩餘${formatDuration(t.total - t.completed)}）` : '';
+                    if (el) el.textContent = t.total > 0 ? `已預定${formatDuration(t.total)}，完成${formatDuration(t.completed)}，剩餘${formatDuration(t.total - t.completed)}` : '';
                 });
 
                 // 暫存區／逾期／更久以後：顯示項目數（收合時也看得到裡面有多少）
