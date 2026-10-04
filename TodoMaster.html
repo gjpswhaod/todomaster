@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.4.1 - 任務管理工具</title>
+    <title>TodoMaster v6.5.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -923,6 +923,60 @@
         }
         .sync-msg.err { color: var(--accent-secondary); }
         .sync-msg.ok { color: var(--accent-success); }
+
+        /* ✨ AI 新增任務 */
+        .ai-key-status {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+        }
+        .ai-link-btn {
+            background: none;
+            border: none;
+            padding: 0;
+            color: var(--accent-primary);
+            font-size: inherit;
+            cursor: pointer;
+            text-decoration: underline;
+        }
+        .ai-hint {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            align-self: center;
+        }
+        .ai-preview:not(:empty) {
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid var(--bg-tertiary);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .ai-card {
+            background-color: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 10px 12px;
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+        .ai-card.off { opacity: 0.45; }
+        .ai-card > input[type="checkbox"] { margin-top: 8px; flex-shrink: 0; }
+        .ai-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+        .ai-card-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+        .ai-card input[type="text"], .ai-card input[type="date"], .ai-card input[type="time"],
+        .ai-card input[type="number"], .ai-card select {
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 6px;
+            color: var(--text-primary);
+            padding: 4px 6px;
+            font-size: 0.85rem;
+        }
+        .ai-card .ai-f-title { width: 100%; font-weight: 600; }
+        .ai-card .ai-f-blocks { width: 56px; }
+        .ai-card-meta { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5; }
+        .ai-card-meta label { cursor: pointer; }
         .sync-link-box {
             margin-top: 20px;
             padding-top: 16px;
@@ -1028,7 +1082,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.4.1';
+        const APP_VERSION = 'v6.5.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1043,6 +1097,15 @@
             '30plus': { emoji: '⏳', label: '30+分鐘' },
             'non-continuous': { emoji: '🔀', label: '非連續' }
         };
+        const TASK_TYPE_META = {
+            goal: '🎯 任務型',
+            accumulative: '📈 累積型',
+            ahead: '⏭️ 超前部署'
+        };
+        // AI 新增任務（v6.5.0）：瀏覽器直接呼叫 Claude API；Key 只存這台裝置，不進雲端同步與備份檔
+        const AI_MODEL = 'claude-haiku-4-5';
+        const AI_API_URL = 'https://api.anthropic.com/v1/messages';
+        const AI_KEY_STORAGE = 'todoAiApiKey';
         // 一天三時段：分界（分鐘數下界）與拖曳落在該段最前面時的預設時刻
         const PERIOD_ORDER = ['morning', 'afternoon', 'evening'];
         const PERIOD_BOUNDS = { morning: 0, afternoon: 12 * 60, evening: 18 * 60 };
@@ -1227,6 +1290,7 @@
                     <button type="button" class="task-search-clear" id="taskSearchClear" title="清除搜尋" aria-label="清除搜尋" hidden>✕</button>
                 </div>
                 <div class="top-bar-right">
+                    <button class="btn btn-secondary" id="aiAddBtn" title="用口語描述，讓 AI 幫你建立任務">✨ AI</button>
                     <button class="btn btn-primary" id="addTaskBtn">+ 新增任務</button>
                 </div>
             </div>
@@ -1564,6 +1628,51 @@
                 <button type="button" class="btn btn-secondary" id="syncCopyLinkBtn" style="margin-top: 8px;">
                     📋 複製連結
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✨ AI 新增任務：口語輸入 → Claude 解析 → 預覽確認後才加入（只新增，不修改／刪除既有任務） -->
+    <div class="modal" id="aiModal">
+        <div class="modal-content" style="max-width: 560px;">
+            <div class="modal-header">✨ AI 新增任務</div>
+            <div id="aiKeySetup">
+                <div class="sync-help">
+                    使用 <strong>Claude API</strong> 解析你的描述。請到 <strong>console.anthropic.com</strong> 建立 API Key（需先儲值，每次解析約不到 NT$0.1）。
+                    Key 只存在<strong>這台裝置</strong>，不會進雲端同步與備份檔；你輸入的文字會傳送給 Anthropic 處理。
+                </div>
+                <form id="aiKeyForm" autocomplete="off">
+                    <div class="form-group">
+                        <label for="aiKeyInput">Claude API Key</label>
+                        <input type="password" id="aiKeyInput" placeholder="sk-ant-…" autocomplete="off">
+                        <div class="sync-msg" id="aiKeyMsg"></div>
+                    </div>
+                    <div style="display: flex; gap: 8px; justify-content: flex-end;">
+                        <button type="button" class="btn btn-secondary" id="aiKeyCancelBtn" style="display: none;">取消</button>
+                        <button type="submit" class="btn btn-primary">儲存 Key</button>
+                    </div>
+                </form>
+            </div>
+            <div id="aiMain">
+                <div class="ai-key-status">
+                    🔑 已設定 API Key ·
+                    <button type="button" class="ai-link-btn" id="aiKeyChangeBtn">更換</button> ·
+                    <button type="button" class="ai-link-btn" id="aiKeyClearBtn">清除</button>
+                </div>
+                <div class="form-group">
+                    <label for="aiInput">想新增什麼任務？用平常說話的方式描述即可，可一次寫好幾件</label>
+                    <textarea id="aiInput" rows="4" placeholder="例：明天早上9點複習解剖學兩小時、週六打掃房間、每3天跑步30分鐘共10次"></textarea>
+                    <div class="sync-msg" id="aiMsg"></div>
+                </div>
+                <div style="display: flex; justify-content: flex-end; gap: 8px;">
+                    <span class="ai-hint">Ctrl＋Enter 送出</span>
+                    <button type="button" class="btn btn-primary" id="aiParseBtn">✨ 解析</button>
+                </div>
+                <div id="aiPreview" class="ai-preview"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('aiModal')">關閉</button>
+                <button type="button" class="btn btn-primary" id="aiAddSelectedBtn" style="display: none;">加入勾選的任務</button>
             </div>
         </div>
     </div>
@@ -2642,6 +2751,7 @@
                     if (purged > 0) this.showNotification(`🧹 已清除 ${purged} 個完成超過 30 天的任務`);
                     this.setupEventListeners();
                     this.setupSyncListeners();
+                    this.setupAiListeners();
                     this.updateUI();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
@@ -4821,6 +4931,360 @@
                 $('syncLinkBox').style.display = link ? '' : 'none';
                 $('syncLinkText').value = link;
                 this.openModal('syncModal');
+            }
+
+            // ===== ✨ AI 新增任務（v6.5.0）=====
+            // 只會「新增」：不讀取、不修改、不刪除既有任務（送給 AI 的只有今天日期與既有標籤名稱）
+            _aiKey() {
+                try { return localStorage.getItem(AI_KEY_STORAGE) || ''; } catch (_) { return ''; }
+            }
+
+            _aiShowKeySetup(show) {
+                const $ = id => document.getElementById(id);
+                $('aiKeySetup').style.display = show ? '' : 'none';
+                $('aiMain').style.display = show ? 'none' : '';
+                $('aiKeyCancelBtn').style.display = (show && this._aiKey()) ? '' : 'none';
+                $('aiKeyInput').value = '';
+                $('aiKeyMsg').textContent = '';
+                $('aiKeyMsg').className = 'sync-msg';
+                if (show) $('aiKeyInput').focus();
+            }
+
+            openAiModal() {
+                this.openModal('aiModal');
+                this._aiShowKeySetup(!this._aiKey());
+                if (this._aiKey()) document.getElementById('aiInput').focus();
+            }
+
+            _aiSetMsg(text, cls = '') {
+                const msg = document.getElementById('aiMsg');
+                msg.textContent = text;
+                msg.className = 'sync-msg' + (cls ? ' ' + cls : '');
+            }
+
+            _aiSystemPrompt() {
+                const wd = ['日', '一', '二', '三', '四', '五', '六'];
+                const today = new Date();
+                const days = [];
+                for (let i = 0; i < 21; i++) {
+                    const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() + i);
+                    days.push(`${localDateStr(d)}（週${wd[d.getDay()]}）`);
+                }
+                const tags = this.tags.length ? this.tags.join('、') : '（目前沒有標籤）';
+                return [
+                    '你是待辦清單 App「TodoMaster」的任務建立助手。使用者會用口語描述想做的事，請把它整理成要「新增」的任務清單。你只能新增任務，不能修改或刪除任何既有任務。',
+                    '',
+                    `今天是 ${days[0]}。之後的日期對照：${days.slice(1).join('、')}。`,
+                    '「這週／本週」「下週」以週一為一週開始；「下週二」指下一個週一開始那週的週二。',
+                    '',
+                    '欄位規則：',
+                    '- title：簡短清楚的任務名稱（繁體中文，不含日期時間）。description：補充細節，沒有就空字串。',
+                    '- dateMode：有明確日期或相對日期（今天、明天、週五、3天後…）→ "scheduled" 並填 date（YYYY-MM-DD）；說「之後再排」或完全沒提到時間 → "unscheduled"（暫存區），date 為 null；說「沒有期限、長期、有空再做」→ "unlimited"，date 為 null。「週五前」這類期限，date 填該日。',
+                    '- time：有提到具體時刻才填 HH:MM（24 小時制，下午3點 → 15:00；早上沒說幾點不要猜），否則 null。只有 scheduled 才可填。',
+                    '- estimatedTime：10 分鐘以內的小事 → "10min"；約 30 分鐘 → "30min"；超過 30 分鐘 → "30plus" 並填 blocks＝所需分鐘數 ÷ 30 無條件進位（至少 2，例：兩小時 → 4）；零碎、分次進行、無法估計連續時間 → "non-continuous"。沒提時長就依常識估計。非 30plus 時 blocks 為 null。',
+                    '- category（只能四選一）：',
+                    '  - "career" 💼 事業：工作、上課、讀書、考試、作業、報告、研究、學習技能、求職。凡是學業相關都屬此類。',
+                    '  - "life" 🏠 生活必須：家事、打掃、採買、煮飯、繳費、看醫生、牙醫、辦手續、搬家、照顧家人、雜事。',
+                    '  - "recharge" ⚡ 充電活動：運動、健身、跑步、休閒娛樂、興趣、閱讀課外書、看電影、旅遊、和朋友聚會、放鬆。',
+                    '  - "review" 🔍 復盤：回顧、反思、寫日記、週記、月整理、檢討、規劃下週。',
+                    '- taskType：預設 "goal"（做完就好的事）；明確是「做越多越好、累積時數」的練習（例：練琴、背單字累積）→ "accumulative"；提前完成未來才需要做的事 → "ahead"。拿不準就用 "goal"。',
+                    `- tags：只能從既有標籤中挑選完全相符的名稱：${tags}。沒有適合的就空陣列，不要自創標籤。`,
+                    '- 重複性任務（每天、每3天、每週…）：recurringInterval 填間隔天數（每天 1、每週 7）；提到次數填 recurringCount；提到結束日期填 recurringUntil（YYYY-MM-DD）；不知道就 null。重複任務必須是 scheduled，沒說從哪天開始就從今天開始。非重複任務這三欄都是 null。',
+                    '- reason：用一句繁體中文簡述你為何這樣分類與設定（給使用者確認用）。',
+                    '',
+                    '一段話裡有多件事就拆成多個任務；同一件事不要重複。若內容完全不是可做的事，回傳空的 tasks 陣列。'
+                ].join('\n');
+            }
+
+            _aiSchema() {
+                const nullable = t => ({ anyOf: [{ type: t }, { type: 'null' }] });
+                return {
+                    type: 'object',
+                    additionalProperties: false,
+                    required: ['tasks'],
+                    properties: {
+                        tasks: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                additionalProperties: false,
+                                required: ['title', 'description', 'dateMode', 'date', 'time', 'estimatedTime', 'blocks',
+                                    'category', 'taskType', 'tags', 'recurringInterval', 'recurringCount', 'recurringUntil', 'reason'],
+                                properties: {
+                                    title: { type: 'string' },
+                                    description: { type: 'string' },
+                                    dateMode: { type: 'string', enum: ['scheduled', 'unscheduled', 'unlimited'] },
+                                    date: nullable('string'),
+                                    time: nullable('string'),
+                                    estimatedTime: { type: 'string', enum: Object.keys(TIME_META) },
+                                    blocks: nullable('integer'),
+                                    category: { type: 'string', enum: Object.keys(CATEGORY_META) },
+                                    taskType: { type: 'string', enum: Object.keys(TASK_TYPE_META) },
+                                    tags: { type: 'array', items: { type: 'string' } },
+                                    recurringInterval: nullable('integer'),
+                                    recurringCount: nullable('integer'),
+                                    recurringUntil: nullable('string'),
+                                    reason: { type: 'string' }
+                                }
+                            }
+                        }
+                    }
+                };
+            }
+
+            async _aiRequest(text) {
+                let res;
+                try {
+                    res = await fetch(AI_API_URL, {
+                        method: 'POST',
+                        headers: {
+                            'content-type': 'application/json',
+                            'x-api-key': this._aiKey(),
+                            'anthropic-version': '2023-06-01',
+                            'anthropic-dangerous-direct-browser-access': 'true'
+                        },
+                        body: JSON.stringify({
+                            model: AI_MODEL,
+                            max_tokens: 4096,
+                            system: this._aiSystemPrompt(),
+                            messages: [{ role: 'user', content: text }],
+                            output_config: { format: { type: 'json_schema', schema: this._aiSchema() } }
+                        })
+                    });
+                } catch (_) {
+                    throw new Error(navigator.onLine === false ? '目前離線，請連上網路再試' : '連不上 Claude API，請檢查網路後再試');
+                }
+                if (!res.ok) {
+                    let detail = '';
+                    try { detail = (await res.json())?.error?.message || ''; } catch (_) { /* ignore */ }
+                    if (res.status === 401) throw new Error('API Key 無效，請按「更換」重新設定');
+                    if (res.status === 403) throw new Error('這個 API Key 沒有使用權限' + (detail ? `：${detail}` : ''));
+                    if (res.status === 429) throw new Error('請求太頻繁或額度已用完，請稍後再試');
+                    if (res.status === 400 && /credit|balance/i.test(detail)) throw new Error('帳戶餘額不足，請到 console.anthropic.com 儲值');
+                    if (res.status >= 500) throw new Error('Claude 服務暫時忙碌，請稍後再試');
+                    throw new Error(`請求失敗（${res.status}）${detail ? '：' + detail : ''}`);
+                }
+                const data = await res.json();
+                if (data.stop_reason === 'refusal') throw new Error('AI 無法處理這段內容，請換個說法');
+                if (data.stop_reason === 'max_tokens') throw new Error('內容太長，請分成幾次輸入');
+                const block = (data.content || []).find(b => b.type === 'text');
+                let parsed;
+                try { parsed = JSON.parse(block ? block.text : ''); } catch (_) { throw new Error('AI 回應格式不正確，請再試一次'); }
+                return Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+            }
+
+            // 把 AI 回傳的一筆草稿整理成合法值（白名單欄位、不合法就退回新增表單的預設值）
+            normalizeAiDraft(d) {
+                if (!d || typeof d !== 'object') return null;
+                const title = String(d.title || '').trim().slice(0, 200);
+                if (!title) return null;
+                const isDate = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(new Date(v).getTime());
+                const isTime = v => typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v);
+                const posInt = v => Number.isInteger(v) && v > 0 ? v : null;
+
+                let dateMode = ['scheduled', 'unscheduled', 'unlimited'].includes(d.dateMode) ? d.dateMode : 'unscheduled';
+                let date = dateMode === 'scheduled' && isDate(d.date) ? d.date : '';
+                if (dateMode === 'scheduled' && !date) dateMode = 'unscheduled';
+
+                const interval = posInt(d.recurringInterval);
+                let recurring = null;
+                if (interval) {
+                    if (dateMode !== 'scheduled') { dateMode = 'scheduled'; date = localDateStr(); }
+                    recurring = {
+                        interval: Math.min(interval, 365),
+                        repeatCount: posInt(d.recurringCount),
+                        untilDate: isDate(d.recurringUntil) ? d.recurringUntil : null
+                    };
+                }
+
+                const estimatedTime = TIME_META[d.estimatedTime] ? d.estimatedTime : '30min';
+                return {
+                    title,
+                    description: String(d.description || '').trim(),
+                    dateMode,
+                    date,
+                    time: dateMode === 'scheduled' && isTime(d.time) ? d.time : '',
+                    estimatedTime,
+                    blocks: estimatedTime === '30plus' ? Math.min(99, Math.max(2, posInt(d.blocks) || 2)) : null,
+                    category: CATEGORY_META[d.category] ? d.category : 'career',
+                    taskType: TASK_TYPE_META[d.taskType] ? d.taskType : 'goal',
+                    tags: Array.isArray(d.tags) ? [...new Set(d.tags.filter(t => this.tags.includes(t)))] : [],
+                    recurring,
+                    reason: String(d.reason || '').trim()
+                };
+            }
+
+            async runAiParse() {
+                const input = document.getElementById('aiInput');
+                const btn = document.getElementById('aiParseBtn');
+                const text = input.value.trim();
+                if (!text) { this._aiSetMsg('請先描述想新增的任務', 'err'); return; }
+                if (!this._aiKey()) { this._aiShowKeySetup(true); return; }
+                btn.disabled = true;
+                btn.textContent = '解析中…';
+                this._aiSetMsg('');
+                try {
+                    const drafts = (await this._aiRequest(text)).map(d => this.normalizeAiDraft(d)).filter(Boolean);
+                    this.renderAiPreview(drafts);
+                    this._aiSetMsg(drafts.length ? `解析出 ${drafts.length} 項任務，確認或微調後按「加入」` : '沒有解析出任務，請換個說法再試', drafts.length ? 'ok' : 'err');
+                } catch (e) {
+                    this._aiSetMsg('⚠️ ' + (e && e.message ? e.message : e), 'err');
+                } finally {
+                    btn.disabled = false;
+                    btn.textContent = '✨ 解析';
+                }
+            }
+
+            renderAiPreview(drafts) {
+                const esc = s => this.escapeHtml(String(s));
+                const opts = (map, sel, label) => Object.keys(map)
+                    .map(k => `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(label(map[k]))}</option>`).join('');
+                const dateModes = { scheduled: '📅 具體日期', unscheduled: '📥 暫存區', unlimited: '♾️ 不限期' };
+                const box = document.getElementById('aiPreview');
+                box.innerHTML = drafts.map((d, i) => {
+                    const rec = d.recurring;
+                    const recText = rec ? `🔁 每${rec.interval}天${rec.repeatCount ? ` 共${rec.repeatCount}次` : ''}${rec.untilDate ? ` 至 ${rec.untilDate}` : ''}` : '';
+                    return `
+                    <div class="ai-card" data-i="${i}">
+                        <input type="checkbox" class="ai-f-on" checked aria-label="加入這項">
+                        <div class="ai-card-body">
+                            <input type="text" class="ai-f-title" value="${esc(d.title)}" aria-label="任務名稱">
+                            <div class="ai-card-row">
+                                <select class="ai-f-dateMode" aria-label="日期模式">${opts(dateModes, d.dateMode, v => v)}</select>
+                                <input type="date" class="ai-f-date" value="${esc(d.date)}" aria-label="日期">
+                                <input type="time" class="ai-f-time" value="${esc(d.time)}" aria-label="時刻">
+                            </div>
+                            <div class="ai-card-row">
+                                <select class="ai-f-category" aria-label="分類">${opts(CATEGORY_META, d.category, m => `${m.emoji} ${m.label}`)}</select>
+                                <select class="ai-f-estimatedTime" aria-label="預計時間">${opts(TIME_META, d.estimatedTime, m => `${m.emoji} ${m.label}`)}</select>
+                                <input type="number" class="ai-f-blocks" min="2" max="99" value="${d.blocks || 2}" aria-label="blocks 數" title="blocks（每個 ${BLOCK_MINUTES} 分鐘）">
+                                <select class="ai-f-taskType" aria-label="任務類型">${opts(TASK_TYPE_META, d.taskType, v => v)}</select>
+                            </div>
+                            <div class="ai-card-meta">
+                                ${d.description ? `<div>📝 ${esc(d.description)}</div>` : ''}
+                                ${d.tags.length ? `<div>🏷️ ${d.tags.map(esc).join('、')}</div>` : ''}
+                                ${rec ? `<div><label><input type="checkbox" class="ai-f-rec" checked> ${esc(recText)}</label></div>` : ''}
+                                ${d.reason ? `<div>💡 ${esc(d.reason)}</div>` : ''}
+                            </div>
+                        </div>
+                    </div>`;
+                }).join('');
+                this.aiDrafts = drafts;
+
+                const sync = card => {
+                    const q = s => card.querySelector(s);
+                    const scheduled = q('.ai-f-dateMode').value === 'scheduled';
+                    q('.ai-f-date').style.display = scheduled ? '' : 'none';
+                    q('.ai-f-time').style.display = scheduled ? '' : 'none';
+                    q('.ai-f-blocks').style.display = q('.ai-f-estimatedTime').value === '30plus' ? '' : 'none';
+                    card.classList.toggle('off', !q('.ai-f-on').checked);
+                };
+                box.querySelectorAll('.ai-card').forEach(card => {
+                    sync(card);
+                    card.addEventListener('change', () => { sync(card); this._aiUpdateAddBtn(); });
+                });
+                this._aiUpdateAddBtn();
+            }
+
+            _aiUpdateAddBtn() {
+                const btn = document.getElementById('aiAddSelectedBtn');
+                const n = document.querySelectorAll('#aiPreview .ai-f-on:checked').length;
+                btn.style.display = document.querySelector('#aiPreview .ai-card') ? '' : 'none';
+                btn.disabled = n === 0;
+                btn.textContent = `加入勾選的 ${n} 項`;
+            }
+
+            // 讀回預覽卡片目前的值，組成與 saveTask() 相同形狀的 taskData，只透過 addTask() 新增
+            addAiSelectedTasks() {
+                const cards = [...document.querySelectorAll('#aiPreview .ai-card')].filter(c => c.querySelector('.ai-f-on').checked);
+                const taskDatas = [];
+                for (const card of cards) {
+                    const q = s => card.querySelector(s);
+                    const draft = this.aiDrafts[Number(card.dataset.i)];
+                    const title = q('.ai-f-title').value.trim();
+                    if (!title) { alert('有勾選的任務沒有名稱，請補上或取消勾選'); q('.ai-f-title').focus(); return; }
+                    const dateMode = q('.ai-f-dateMode').value;
+                    let date = '';
+                    if (dateMode === 'scheduled') {
+                        date = q('.ai-f-date').value;
+                        if (!date) { alert(`「${title}」選了具體日期但沒有填日期`); q('.ai-f-date').focus(); return; }
+                    } else if (dateMode === 'unlimited') {
+                        date = '9999-12-31';
+                    }
+                    const estimatedTime = q('.ai-f-estimatedTime').value;
+                    const blocks = estimatedTime === '30plus' ? Math.min(99, Math.max(2, parseInt(q('.ai-f-blocks').value) || 2)) : null;
+                    const recOn = draft.recurring && q('.ai-f-rec')?.checked && dateMode === 'scheduled';
+                    taskDatas.push({
+                        title,
+                        description: draft.description,
+                        date,
+                        time: dateMode === 'scheduled' ? (q('.ai-f-time').value || null) : null,
+                        estimatedTime,
+                        blocks,
+                        completedBlocks: 0,
+                        blockTimes: [],
+                        category: q('.ai-f-category').value,
+                        taskType: q('.ai-f-taskType').value,
+                        tags: draft.tags,
+                        recurring: recOn ? { enabled: true, ...draft.recurring } : null,
+                        groupId: null,
+                        groupOrder: null,
+                        actualTime: null,
+                        nextStepNotes: null,
+                        pinned: null
+                    });
+                }
+                if (!taskDatas.length) return;
+                taskDatas.forEach(data => this.recomputeRecurringUntil(this.addTask(data)));
+                this.saveToStorage();
+                this.updateUI();
+                this.showNotification(`✨ 已加入 ${taskDatas.length} 項任務`);
+                document.getElementById('aiInput').value = '';
+                document.getElementById('aiPreview').innerHTML = '';
+                this.aiDrafts = [];
+                this._aiUpdateAddBtn();
+                this._aiSetMsg('');
+                closeModal('aiModal');
+            }
+
+            setupAiListeners() {
+                const $ = id => document.getElementById(id);
+                this.aiDrafts = [];
+                $('aiAddBtn').addEventListener('click', () => this.openAiModal());
+                $('aiParseBtn').addEventListener('click', () => this.runAiParse());
+                $('aiInput').addEventListener('keydown', e => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        this.runAiParse();
+                    }
+                });
+                $('aiAddSelectedBtn').addEventListener('click', () => this.addAiSelectedTasks());
+                $('aiKeyChangeBtn').addEventListener('click', () => this._aiShowKeySetup(true));
+                $('aiKeyCancelBtn').addEventListener('click', () => this._aiShowKeySetup(false));
+                $('aiKeyClearBtn').addEventListener('click', () => {
+                    if (!confirm('要清除這台裝置上儲存的 Claude API Key 嗎？')) return;
+                    try { localStorage.removeItem(AI_KEY_STORAGE); } catch (_) { /* ignore */ }
+                    this._aiShowKeySetup(true);
+                });
+                $('aiKeyForm').addEventListener('submit', e => {
+                    e.preventDefault();
+                    const key = $('aiKeyInput').value.trim();
+                    const msg = $('aiKeyMsg');
+                    if (!/^sk-ant-/.test(key)) {
+                        msg.textContent = 'Key 格式不正確（應以 sk-ant- 開頭）';
+                        msg.className = 'sync-msg err';
+                        return;
+                    }
+                    try {
+                        localStorage.setItem(AI_KEY_STORAGE, key);
+                    } catch (_) {
+                        msg.textContent = '無法儲存（瀏覽器儲存空間不可用）';
+                        msg.className = 'sync-msg err';
+                        return;
+                    }
+                    this._aiShowKeySetup(false);
+                    $('aiInput').focus();
+                });
             }
 
             setupSyncListeners() {
