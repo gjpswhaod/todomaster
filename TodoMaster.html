@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.3 - 任務管理工具</title>
+    <title>TodoMaster v6.5.4 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -511,10 +511,13 @@
         .subtask-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
         .subtask-row .task-title { flex: 1; font-size: 0.9rem; }
         .subtask-time { color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; }
-        .subtask-edit-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-        .subtask-edit-row .subtask-edit-title { flex: 1; cursor: pointer; }
-        .subtask-add-row { display: flex; gap: 6px; flex-wrap: wrap; }
-        .subtask-add-row input[type=text] { flex: 1; min-width: 120px; }
+        .subtask-row .task-title { cursor: pointer; }
+        .subtask-del { background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 0 4px; }
+        .subtask-del:hover { color: #ff6b6b; }
+        .subtask-add-btn { background: var(--bg-tertiary); border: 1px solid var(--border-color, #555); color: var(--text-primary); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; line-height: 1; flex-shrink: 0; margin-left: 6px; }
+        .subtask-add-btn:hover { background: var(--accent-primary); color: #fff; }
+        .task-item.drag-hidden { display: none; }
+        .task-blocks.linked .task-block { pointer-events: none; }
 
         .task-item.completed {
             opacity: 0.6;
@@ -1153,7 +1156,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.3';
+        const APP_VERSION = 'v6.5.4';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1546,22 +1549,6 @@
                             <label>此群組內順序</label>
                             <div id="groupOrderDisplay" style="padding: 10px; background-color: var(--bg-tertiary); border-radius: 6px; color: var(--text-secondary);"></div>
                         </div>
-                    </div>
-                </div>
-
-                <div class="form-group" id="subtaskGroup" style="display: none;">
-                    <label>子任務（只記標題與預計時間）</label>
-                    <div id="subtaskEditList"></div>
-                    <div class="subtask-add-row">
-                        <input type="text" id="subtaskTitleInput" placeholder="子任務名稱">
-                        <select id="subtaskTimeSelect">
-                            <option value="10min">⏱️ 10分鐘</option>
-                            <option value="30min">⏲️ 30分鐘</option>
-                            <option value="30plus:2">⏳ 1小時</option>
-                            <option value="30plus:4">⏳ 2小時</option>
-                            <option value="non-continuous">🔀 非連續</option>
-                        </select>
-                        <button type="button" class="btn btn-secondary btn-small" id="subtaskAddBtn">＋ 新增</button>
                     </div>
                 </div>
 
@@ -2785,7 +2772,6 @@
                     this.setupEventListeners();
                     this.setupSyncListeners();
                     this.setupAiListeners();
-                    this.setupSubtaskListeners();
                     this.updateUI();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
@@ -2988,104 +2974,171 @@
 
             // ===== 子任務 =====
             getSubtasks(parentId) {
-                return this.tasks.filter(t => t.parentId === parentId);
+                return this.tasks.filter(t => t.parentId === parentId)
+                    .sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
             }
 
-            _createSubtaskCard(sub) {
+            // 多 block 主任務：進度條 = 已完成子任務數（上限 blocks），blockTimes 依完成的子任務用時重建
+            syncBlocksFromSubtasks(parent) {
+                if (!parent || !(parent.blocks > 1)) return;
+                const subs = this.getSubtasks(parent.id);
+                if (!subs.length) return;
+                const done = subs.filter(s => s.completed).slice(0, parent.blocks);
+                parent.completedBlocks = done.length;
+                parent.blockTimes = done.map(s => s.actualTime || 0);
+            }
+
+            // 主任務實際用時加減（歸零時清成 null，與「尚未記錄」一致）
+            adjustParentActual(parent, delta) {
+                if (!parent || !delta) return;
+                parent.actualTime = Math.max(0, (parent.actualTime || 0) + delta) || null;
+            }
+
+            addSubtaskTo(parentId) {
+                const parent = this.getTaskById(parentId);
+                if (!parent || isSubtask(parent)) return;
+                const existing = this.getSubtasks(parentId).length;
+                const make = (title, estimatedTime) => this.addTask({
+                    parentId, title: title.slice(0, 200), description: '', date: '', time: null,
+                    estimatedTime, blocks: null, completedBlocks: 0, blockTimes: [],
+                    category: parent.category, taskType: 'goal', tags: [], recurring: null,
+                    groupId: null, groupOrder: null, actualTime: null, nextStepNotes: null, pinned: null
+                });
+                if (parent.blocks > 1 && existing < parent.blocks) {
+                    for (let i = existing + 1; i <= parent.blocks; i++) make(`${parent.title} #${i}`, '30min');
+                    this.showNotification(`➕ 已建立 ${parent.blocks - existing} 個子任務`);
+                } else {
+                    const name = prompt('子任務名稱');
+                    if (!name || !name.trim()) return;
+                    make(name.trim(), '30min');
+                }
+                this.syncBlocksFromSubtasks(parent);
+                this.saveToStorage();
+                this.updateUI();
+            }
+
+            deleteSubtask(sub) {
+                const parent = this.getTaskById(sub.parentId);
+                if (sub.completed) this.adjustParentActual(parent, -(sub.actualTime || 0));
+                this.tasks = this.tasks.filter(t => t.id !== sub.id);
+                this.syncBlocksFromSubtasks(parent);
+                this.saveToStorage();
+                this.updateUI();
+            }
+
+            _createSubtaskCard(sub, ctx) {
                 const li = document.createElement('li');
                 li.className = 'task-item subtask fade-in' + (sub.completed ? ' completed' : '');
-                li.draggable = false;
+                li.draggable = !!ctx?.isDraggable;
                 li.dataset.taskId = sub.id;
                 const meta = TIME_META[sub.estimatedTime];
-                const timeText = sub.estimatedTime === '30plus' && sub.blocks
-                    ? `${sub.blocks * BLOCK_MINUTES}分鐘` : (meta?.label || '');
+                const timeText = meta?.label || '';
                 li.innerHTML = `
                     <div class="subtask-row">
                         <input type="checkbox" class="task-checkbox" ${sub.completed ? 'checked' : ''}>
-                        <span class="task-title">${this.escapeHtml(sub.title)}</span>
-                        <span class="subtask-time">${meta?.emoji || ''} ${timeText}</span>
+                        <span class="task-title" title="點擊改名">${this.escapeHtml(sub.title)}</span>
+                        <span class="subtask-time">${sub.completed && sub.actualTime != null ? `✓ ${sub.actualTime}分鐘` : `${meta?.emoji || ''} ${timeText}`}</span>
+                        <button type="button" class="subtask-del" title="刪除子任務">✕</button>
                     </div>`;
                 const checkbox = li.querySelector('.task-checkbox');
                 checkbox.addEventListener('click', e => e.stopPropagation());
                 checkbox.addEventListener('change', () => {
-                    this.updateTask(sub.id, checkbox.checked
-                        ? { completed: true }
-                        : { completed: false, completedAt: null, completedDate: null });
-                    this.updateUI();
+                    if (checkbox.checked) {
+                        this.openSubtaskTimeModal(sub.id);
+                    } else {
+                        const parent = this.getTaskById(sub.parentId);
+                        this.adjustParentActual(parent, -(sub.actualTime || 0));
+                        this.updateTask(sub.id, { completed: false, completedAt: null, completedDate: null, actualTime: null });
+                        this.syncBlocksFromSubtasks(parent);
+                        this.saveToStorage();
+                        this.updateUI();
+                    }
                 });
-                li.addEventListener('click', () => this.openEditModal(sub.parentId));
+                li.querySelector('.subtask-del').addEventListener('click', e => {
+                    e.stopPropagation();
+                    this.deleteSubtask(sub);
+                });
+                li.querySelector('.task-title').addEventListener('click', e => {
+                    e.stopPropagation();
+                    const name = prompt('子任務名稱', sub.title);
+                    if (name && name.trim()) {
+                        this.updateTask(sub.id, { title: name.trim().slice(0, 200) });
+                        this.updateUI();
+                    }
+                });
+                li.addEventListener('click', e => e.stopPropagation());
+                if (ctx?.isDraggable) {
+                    li.classList.add('sortable');
+                    li.addEventListener('dragstart', e => {
+                        e.stopPropagation();
+                        e.dataTransfer.effectAllowed = 'move';
+                        li.classList.add('dragging');
+                    });
+                    li.addEventListener('dragend', () => { li.classList.remove('dragging'); this.updateUI(); });
+                }
                 return li;
             }
 
-            renderSubtaskEditor() {
-                const task = this.currentEditingTask;
-                const box = document.getElementById('subtaskEditList');
-                if (!task || isSubtask(task)) { box.innerHTML = ''; return; }
-                box.innerHTML = this.getSubtasks(task.id).map(sub => {
-                    const meta = TIME_META[sub.estimatedTime];
-                    const t = sub.estimatedTime === '30plus' && sub.blocks ? `${sub.blocks * BLOCK_MINUTES}分鐘` : meta?.label;
-                    return `<div class="subtask-edit-row" data-sub-id="${sub.id}">
-                        <span class="subtask-edit-title" title="點擊改名">${this.escapeHtml(sub.title)}</span>
-                        <span class="subtask-time">${meta?.emoji || ''} ${t}</span>
-                        <button type="button" class="btn btn-danger btn-small subtask-del">✕</button>
-                    </div>`;
-                }).join('');
-                box.querySelectorAll('.subtask-edit-row').forEach(row => {
-                    const id = row.dataset.subId;
-                    row.querySelector('.subtask-del').addEventListener('click', () => {
-                        this.deleteTask(id);
-                        this.renderSubtaskEditor();
-                        this.updateUI();
-                    });
-                    row.querySelector('.subtask-edit-title').addEventListener('click', () => {
-                        const sub = this.getTaskById(id);
-                        const name = prompt('子任務名稱', sub.title);
-                        if (name && name.trim()) {
-                            this.updateTask(id, { title: name.trim().slice(0, 200) });
-                            this.renderSubtaskEditor();
-                            this.updateUI();
+            // 勾選子任務：詢問該段實際用時（重用 block 時間視窗），確認後累加到主任務；取消則還原勾選
+            openSubtaskTimeModal(subId) {
+                const sub = this.getTaskById(subId);
+                if (!sub) return;
+                const estimate = getTaskPlannedMinutes(sub);
+                const modal = document.getElementById('blockTimeModal');
+                document.getElementById('blockTimeModalTitle').textContent = `子任務完成：${sub.title}`;
+                document.getElementById('blockTimeModalHint').textContent = `預計：${estimate} 分鐘`;
+                document.getElementById('blockTimeInput').value = '';
+                document.getElementById('blockTimeUseEstimateBtn').textContent = `使用預計時間 (${estimate}分)`;
+                const finish = minutes => {
+                    modal.onclick = null;
+                    const parent = this.getTaskById(sub.parentId);
+                    this.updateTask(subId, { completed: true, actualTime: minutes });
+                    this.adjustParentActual(parent, minutes);
+                    this.syncBlocksFromSubtasks(parent);
+                    this.saveToStorage();
+                    closeModal('blockTimeModal');
+                    this.showNotification(`✅ 子任務完成，用時 ${minutes} 分鐘`);
+                    this.updateUI();
+                };
+                const cancel = () => {
+                    modal.onclick = null;
+                    closeModal('blockTimeModal');
+                    this.updateUI();
+                };
+                document.getElementById('blockTimeUseEstimateBtn').onclick = () => finish(estimate);
+                document.getElementById('blockTimeConfirmBtn').onclick = () => {
+                    const val = parseInt(document.getElementById('blockTimeInput').value);
+                    finish(isNaN(val) || val < 0 ? estimate : val);
+                };
+                modal.onclick = e => { if (e.target === modal) cancel(); };
+                bindEnterToClick('blockTimeInput', 'blockTimeConfirmBtn');
+                this.openModal('blockTimeModal');
+            }
+
+            // 子任務放下：新主任務 = DOM 中往前最近的主任務卡；找不到就還原。順帶搬移已記錄的用時並重編 order
+            dropSubtask(el) {
+                const sub = this.getTaskById(el.dataset.taskId);
+                let prev = el.previousElementSibling;
+                while (prev && !(prev.classList.contains('task-item') && !prev.classList.contains('subtask'))) prev = prev.previousElementSibling;
+                if (sub && prev && prev.dataset.taskId !== sub.parentId) {
+                    const oldParent = this.getTaskById(sub.parentId);
+                    const newParent = this.getTaskById(prev.dataset.taskId);
+                    if (newParent) {
+                        if (sub.completed) {
+                            this.adjustParentActual(oldParent, -(sub.actualTime || 0));
+                            this.adjustParentActual(newParent, sub.actualTime || 0);
                         }
-                    });
+                        sub.parentId = newParent.id;
+                        this.syncBlocksFromSubtasks(oldParent);
+                        this.syncBlocksFromSubtasks(newParent);
+                    }
+                }
+                document.querySelectorAll('#taskList .task-item.subtask').forEach((node, i) => {
+                    const t = this.getTaskById(node.dataset.taskId);
+                    if (t) t.order = i;
                 });
-            }
-
-            addSubtaskFromEditor() {
-                const parent = this.currentEditingTask;
-                if (!parent || isSubtask(parent)) return;
-                const input = document.getElementById('subtaskTitleInput');
-                const title = input.value.trim();
-                if (!title) { input.focus(); return; }
-                const [estimatedTime, blocksStr] = document.getElementById('subtaskTimeSelect').value.split(':');
-                this.addTask({
-                    parentId: parent.id,
-                    title: title.slice(0, 200),
-                    description: '',
-                    date: '',
-                    time: null,
-                    estimatedTime,
-                    blocks: blocksStr ? Number(blocksStr) : null,
-                    completedBlocks: 0,
-                    blockTimes: [],
-                    category: parent.category,
-                    taskType: 'goal',
-                    tags: [],
-                    recurring: null,
-                    groupId: null,
-                    groupOrder: null,
-                    actualTime: null,
-                    nextStepNotes: null,
-                    pinned: null
-                });
-                input.value = '';
-                this.renderSubtaskEditor();
+                this.saveToStorage();
                 this.updateUI();
-            }
-
-            setupSubtaskListeners() {
-                document.getElementById('subtaskAddBtn').addEventListener('click', () => this.addSubtaskFromEditor());
-                document.getElementById('subtaskTitleInput').addEventListener('keydown', e => {
-                    if (e.key === 'Enter') { e.preventDefault(); this.addSubtaskFromEditor(); }
-                });
             }
 
             buildCompletionUpdates(task) {
@@ -3280,7 +3333,7 @@
                     // 子任務緊接在主任務下方（同一清單）
                     this.getSubtasks(task.id)
                         .filter(sub => this.showCompleted || !sub.completed)
-                        .forEach(sub => li.parentElement.appendChild(this._createSubtaskCard(sub)));
+                        .forEach(sub => li.parentElement.appendChild(this._createSubtaskCard(sub, ctx)));
                 });
 
                 if (ctx.isSectionView) {
@@ -3461,6 +3514,7 @@
                 li.dataset.taskId = task.id;
 
                 const dueStatus = this.getTaskDueStatus(task);
+                const hasSubs = this.getSubtasks(task.id).length > 0;
 
                 // 計算預計時間顯示
                 let estimatedDisplay = TIME_META[task.estimatedTime]?.label;
@@ -3483,6 +3537,7 @@
                                     </div>
                                 ` : ''}
                             </div>
+                            ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                         </div>
                         <div class="task-content">
                             ${task.description ? `<div class="task-description">${this.escapeHtml(task.description)}</div>` : ''}
@@ -3500,7 +3555,7 @@
                             ` : ''}
                             ${task.blocks && task.blocks > 1 ? `
                                 <div class="task-progress">
-                                    <div class="task-blocks" data-task-id="${task.id}">
+                                    <div class="task-blocks${hasSubs ? ' linked' : ''}" data-task-id="${task.id}">
                                         ${Array.from({length: task.blocks}, (_, i) => `
                                             <div class="task-block ${i < (task.completedBlocks || 0) ? 'completed' : ''}"
                                                  data-block-index="${i}"
@@ -3566,15 +3621,21 @@
                     li.addEventListener('dragstart', (e) => {
                         e.dataTransfer.effectAllowed = 'move';
                         li.classList.add('dragging');
+                        // 子任務跟著主任務走：拖曳期間先隱藏，放下後整體重繪
+                        if (hasSubs) setTimeout(() => {
+                            let n = li.nextElementSibling;
+                            while (n && n.classList.contains('subtask')) { n.classList.add('drag-hidden'); n = n.nextElementSibling; }
+                        }, 0);
                     });
 
                     li.addEventListener('dragend', () => {
                         li.classList.remove('dragging');
+                        if (hasSubs) this.updateUI();
                     });
                 }
 
                 // 塊點擊事件
-                if (task.blocks && task.blocks > 1) {
+                if (task.blocks && task.blocks > 1 && !hasSubs) {
                     const blocks = li.querySelectorAll('.task-block');
                     blocks.forEach((block, index) => {
                         block.addEventListener('click', (e) => {
@@ -3598,6 +3659,12 @@
                         });
                     });
                 }
+
+                const addSubBtn = li.querySelector('.subtask-add-btn');
+                if (addSubBtn) addSubBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    this.addSubtaskTo(task.id);
+                });
 
                 // 重新安排到今天按鈕
                 const rescheduleBtn = li.querySelector('.reschedule-today-btn');
@@ -3627,7 +3694,7 @@
                 li.addEventListener('click', (e) => {
                     if (!e.target.classList.contains('task-block') && e.target !== checkbox
                         && !e.target.classList.contains('reschedule-today-btn')
-                        && !e.target.closest('.staging-actions')) {
+                        && !e.target.closest('.staging-actions') && !e.target.closest('.subtask-add-btn')) {
                         this.openEditModal(task.id);
                     }
                 });
@@ -3913,7 +3980,6 @@
                     document.getElementById('deleteTaskBtn').style.display = 'none';
                     document.getElementById('duplicateTaskBtn').style.display = 'none';
                     document.getElementById('actualTimeGroup').style.display = 'none';
-                    document.getElementById('subtaskGroup').style.display = 'none';
                     document.getElementById('taskRecurring').checked = false;
                     document.getElementById('recurringOptions').style.display = 'none';
                     document.getElementById('taskGroup').checked = false;
@@ -4117,6 +4183,15 @@
                     if (!container) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
+                    if (draggingEl.classList.contains('subtask')) {
+                        // 子任務：依游標落在目標卡上／下半部插入；歸屬由放下時的前一張主任務卡決定
+                        const over = e.target.closest('.task-item');
+                        if (!over || over === draggingEl || !container.contains(over)) return;
+                        const r = over.getBoundingClientRect();
+                        if (e.clientY < r.top + r.height / 2) over.before(draggingEl);
+                        else over.after(draggingEl);
+                        return;
+                    }
                     const after = this.getDragAfterElement(container, e.clientY);
                     if (after == null) container.appendChild(draggingEl);
                     else container.insertBefore(draggingEl, after);
@@ -4124,6 +4199,8 @@
 
                 // 統一 drop 監聽器（只綁定一次）
                 document.addEventListener('drop', (e) => {
+                    const dragSub = document.querySelector('.task-item.subtask.dragging');
+                    if (dragSub) { this.dropSubtask(dragSub); return; }
                     const canDrop = this.sortMode === 'drag' || this.currentFilter.startsWith('group:');
                     const isSectionView = this.currentFilter === 'all';
 
@@ -4312,10 +4389,6 @@
 
                 document.getElementById('actualTimeGroup').style.display = 'block';
                 document.getElementById('actualTime').value = task.actualTime || '';
-
-                // 子任務只能在頂層主任務的編輯視窗管理
-                document.getElementById('subtaskGroup').style.display = isSubtask(task) ? 'none' : 'block';
-                this.renderSubtaskEditor();
 
                 // 顯示下一步建議欄位（如果有實際時間或已完成）
                 if (task.actualTime || task.completed) {
