@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.0 - 任務管理工具</title>
+    <title>TodoMaster v6.5.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -1082,7 +1082,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.0';
+        const APP_VERSION = 'v6.5.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1102,10 +1102,11 @@
             accumulative: '📈 累積型',
             ahead: '⏭️ 超前部署'
         };
-        // AI 新增任務（v6.5.0）：瀏覽器直接呼叫 Claude API；Key 只存這台裝置，不進雲端同步與備份檔
-        const AI_MODEL = 'claude-haiku-4-5';
-        const AI_API_URL = 'https://api.anthropic.com/v1/messages';
-        const AI_KEY_STORAGE = 'todoAiApiKey';
+        // AI 新增任務（v6.5.1 Gemini 版）：瀏覽器直接呼叫 Gemini API；Key 只存這台裝置，不進雲端同步與備份檔
+        // 免費額度按模型分開計算：第一個額度用完或忙碌時自動改用下一個
+        const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+        const AI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
+        const AI_KEY_STORAGE = 'todoGeminiApiKey';
         // 一天三時段：分界（分鐘數下界）與拖曳落在該段最前面時的預設時刻
         const PERIOD_ORDER = ['morning', 'afternoon', 'evening'];
         const PERIOD_BOUNDS = { morning: 0, afternoon: 12 * 60, evening: 18 * 60 };
@@ -1290,7 +1291,7 @@
                     <button type="button" class="task-search-clear" id="taskSearchClear" title="清除搜尋" aria-label="清除搜尋" hidden>✕</button>
                 </div>
                 <div class="top-bar-right">
-                    <button class="btn btn-secondary" id="aiAddBtn" title="用口語描述，讓 AI 幫你建立任務">✨ AI</button>
+                    <button class="btn btn-secondary" id="aiAddBtn" title="用口語描述，讓 AI（Gemini）幫你建立任務">✨ AI</button>
                     <button class="btn btn-primary" id="addTaskBtn">+ 新增任務</button>
                 </div>
             </div>
@@ -1632,19 +1633,20 @@
         </div>
     </div>
 
-    <!-- ✨ AI 新增任務：口語輸入 → Claude 解析 → 預覽確認後才加入（只新增，不修改／刪除既有任務） -->
+    <!-- ✨ AI 新增任務：口語輸入 → Gemini 解析 → 預覽確認後才加入（只新增，不修改／刪除既有任務） -->
     <div class="modal" id="aiModal">
         <div class="modal-content" style="max-width: 560px;">
-            <div class="modal-header">✨ AI 新增任務</div>
+            <div class="modal-header">✨ AI 新增任務（Gemini）</div>
             <div id="aiKeySetup">
                 <div class="sync-help">
-                    使用 <strong>Claude API</strong> 解析你的描述。請到 <strong>console.anthropic.com</strong> 建立 API Key（需先儲值，每次解析約不到 NT$0.1）。
-                    Key 只存在<strong>這台裝置</strong>，不會進雲端同步與備份檔；你輸入的文字會傳送給 Anthropic 處理。
+                    使用 <strong>Google Gemini API（免費版）</strong> 解析你的描述。請到 <strong>aistudio.google.com</strong> → Get API key 免費建立，不用綁信用卡。
+                    Key 只存在<strong>這台裝置</strong>，不會進雲端同步與備份檔。
+                    <br>⚠️ 免費版輸入的內容<strong>可能被 Google 用於改善產品</strong>，請勿輸入敏感資料。
                 </div>
                 <form id="aiKeyForm" autocomplete="off">
                     <div class="form-group">
-                        <label for="aiKeyInput">Claude API Key</label>
-                        <input type="password" id="aiKeyInput" placeholder="sk-ant-…" autocomplete="off">
+                        <label for="aiKeyInput">Gemini API Key</label>
+                        <input type="password" id="aiKeyInput" placeholder="AIza…" autocomplete="off">
                         <div class="sync-msg" id="aiKeyMsg"></div>
                     </div>
                     <div style="display: flex; gap: 8px; justify-content: flex-end;">
@@ -4933,7 +4935,7 @@
                 this.openModal('syncModal');
             }
 
-            // ===== ✨ AI 新增任務（v6.5.0）=====
+            // ===== ✨ AI 新增任務（v6.5.1 Gemini 版）=====
             // 只會「新增」：不讀取、不修改、不刪除既有任務（送給 AI 的只有今天日期與既有標籤名稱）
             _aiKey() {
                 try { return localStorage.getItem(AI_KEY_STORAGE) || ''; } catch (_) { return ''; }
@@ -4997,7 +4999,7 @@
             }
 
             _aiSchema() {
-                const nullable = t => ({ anyOf: [{ type: t }, { type: 'null' }] });
+                const nullable = t => ({ type: [t, 'null'] });
                 return {
                     type: 'object',
                     additionalProperties: false,
@@ -5032,45 +5034,49 @@
                 };
             }
 
+            // 依序嘗試 AI_MODELS：額度用完（429）或忙碌（5xx）就換下一個模型；其餘錯誤直接回報
             async _aiRequest(text) {
-                let res;
-                try {
-                    res = await fetch(AI_API_URL, {
-                        method: 'POST',
-                        headers: {
-                            'content-type': 'application/json',
-                            'x-api-key': this._aiKey(),
-                            'anthropic-version': '2023-06-01',
-                            'anthropic-dangerous-direct-browser-access': 'true'
-                        },
-                        body: JSON.stringify({
-                            model: AI_MODEL,
-                            max_tokens: 4096,
-                            system: this._aiSystemPrompt(),
-                            messages: [{ role: 'user', content: text }],
-                            output_config: { format: { type: 'json_schema', schema: this._aiSchema() } }
-                        })
-                    });
-                } catch (_) {
-                    throw new Error(navigator.onLine === false ? '目前離線，請連上網路再試' : '連不上 Claude API，請檢查網路後再試');
+                const body = JSON.stringify({
+                    systemInstruction: { parts: [{ text: this._aiSystemPrompt() }] },
+                    contents: [{ role: 'user', parts: [{ text }] }],
+                    generationConfig: { responseMimeType: 'application/json', responseJsonSchema: this._aiSchema() }
+                });
+                let lastStatus = 0;
+                for (const model of AI_MODELS) {
+                    let res;
+                    try {
+                        res = await fetch(`${AI_API_BASE}${model}:generateContent`, {
+                            method: 'POST',
+                            headers: { 'content-type': 'application/json', 'x-goog-api-key': this._aiKey() },
+                            body
+                        });
+                    } catch (_) {
+                        throw new Error(navigator.onLine === false ? '目前離線，請連上網路再試' : '連不上 Gemini API，請檢查網路後再試');
+                    }
+                    if (res.status === 429 || res.status >= 500) {
+                        lastStatus = res.status;
+                        continue;
+                    }
+                    if (!res.ok) {
+                        let detail = '';
+                        try { detail = (await res.json())?.error?.message || ''; } catch (_) { /* ignore */ }
+                        if (res.status === 401 || (res.status === 400 && /API[_ ]key/i.test(detail))) throw new Error('API Key 無效，請按「更換」重新設定');
+                        if (res.status === 403) throw new Error('這個 API Key 沒有使用權限' + (detail ? `：${detail}` : ''));
+                        throw new Error(`請求失敗（${res.status}）${detail ? '：' + detail : ''}`);
+                    }
+                    const data = await res.json();
+                    if (data.promptFeedback?.blockReason) throw new Error('AI 無法處理這段內容，請換個說法');
+                    const cand = (data.candidates || [])[0];
+                    if (!cand) throw new Error('AI 沒有回應，請再試一次');
+                    if (['SAFETY', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'RECITATION'].includes(cand.finishReason)) throw new Error('AI 無法處理這段內容，請換個說法');
+                    if (cand.finishReason === 'MAX_TOKENS') throw new Error('內容太長，請分成幾次輸入');
+                    const out = (cand.content?.parts || []).filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
+                    let parsed;
+                    try { parsed = JSON.parse(out); } catch (_) { throw new Error('AI 回應格式不正確，請再試一次'); }
+                    return Array.isArray(parsed?.tasks) ? parsed.tasks : [];
                 }
-                if (!res.ok) {
-                    let detail = '';
-                    try { detail = (await res.json())?.error?.message || ''; } catch (_) { /* ignore */ }
-                    if (res.status === 401) throw new Error('API Key 無效，請按「更換」重新設定');
-                    if (res.status === 403) throw new Error('這個 API Key 沒有使用權限' + (detail ? `：${detail}` : ''));
-                    if (res.status === 429) throw new Error('請求太頻繁或額度已用完，請稍後再試');
-                    if (res.status === 400 && /credit|balance/i.test(detail)) throw new Error('帳戶餘額不足，請到 console.anthropic.com 儲值');
-                    if (res.status >= 500) throw new Error('Claude 服務暫時忙碌，請稍後再試');
-                    throw new Error(`請求失敗（${res.status}）${detail ? '：' + detail : ''}`);
-                }
-                const data = await res.json();
-                if (data.stop_reason === 'refusal') throw new Error('AI 無法處理這段內容，請換個說法');
-                if (data.stop_reason === 'max_tokens') throw new Error('內容太長，請分成幾次輸入');
-                const block = (data.content || []).find(b => b.type === 'text');
-                let parsed;
-                try { parsed = JSON.parse(block ? block.text : ''); } catch (_) { throw new Error('AI 回應格式不正確，請再試一次'); }
-                return Array.isArray(parsed?.tasks) ? parsed.tasks : [];
+                if (lastStatus === 429) throw new Error('今天的免費額度已用完（或太頻繁），請稍後或明天再試');
+                throw new Error('Gemini 服務暫時忙碌，請稍後再試');
             }
 
             // 把 AI 回傳的一筆草稿整理成合法值（白名單欄位、不合法就退回新增表單的預設值）
@@ -5262,7 +5268,7 @@
                 $('aiKeyChangeBtn').addEventListener('click', () => this._aiShowKeySetup(true));
                 $('aiKeyCancelBtn').addEventListener('click', () => this._aiShowKeySetup(false));
                 $('aiKeyClearBtn').addEventListener('click', () => {
-                    if (!confirm('要清除這台裝置上儲存的 Claude API Key 嗎？')) return;
+                    if (!confirm('要清除這台裝置上儲存的 Gemini API Key 嗎？')) return;
                     try { localStorage.removeItem(AI_KEY_STORAGE); } catch (_) { /* ignore */ }
                     this._aiShowKeySetup(true);
                 });
@@ -5270,8 +5276,8 @@
                     e.preventDefault();
                     const key = $('aiKeyInput').value.trim();
                     const msg = $('aiKeyMsg');
-                    if (!/^sk-ant-/.test(key)) {
-                        msg.textContent = 'Key 格式不正確（應以 sk-ant- 開頭）';
+                    if (key.length < 20 || /\s/.test(key)) {
+                        msg.textContent = 'Key 格式不正確，請貼上完整的 Gemini API Key';
                         msg.className = 'sync-msg err';
                         return;
                     }

@@ -5,7 +5,7 @@
 此資料夾用於 **Claude Code 維護和開發 TodoMaster 應用**。
 
 **主應用**：`TodoMaster.html`  
-**版本**：6.5.0 (2026-10-04)  
+**版本**：6.5.1 (2026-10-04)  
 **狀態**：✅ 穩定版本  
 **責任方**：Claude Code
 
@@ -73,13 +73,16 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 - 📁 **備份資料夾（v6.3.4 起）** - 匯出、匯入前**一律先詢問要用哪個資料夾，不會自動下載**：桌面 Chrome／Edge 跳出資料夾選取視窗（匯出＝寫入該資料夾；匯入＝列出資料夾內的 `.json` 由新到舊供選擇，也可改選單一檔案）；手機、Firefox、Safari 無法指定資料夾，匯出先跳說明確認才下載到瀏覽器預設位置，匯入直接開系統檔案選擇器
 - 設定步驟見下方「☁️ 雲端同步設定」
 
-### ✨ AI 新增任務（v6.5.0 起）
+### ✨ AI 新增任務（v6.5.0 起；v6.5.1 改用 Gemini 免費版）
 - 頂欄「✨ AI」開啟視窗，用平常說話的方式描述要做的事（可一次寫好幾件），例：「明天早上9點複習解剖學兩小時、週六打掃房間、每3天跑步30分鐘共10次」
-- 由 **Claude API**（模型 `claude-haiku-4-5`）解析成任務並自動判斷：日期（今天／明天／下週二…自動換算，沒提日期放 📥 暫存區）、時刻、預計時間與 blocks、分類（讀書／考試／工作／學習 → 💼 事業；家事／就醫／採買 → 🏠 生活必須；運動／休閒 → ⚡ 充電活動；回顧／反思 → 🔍 復盤）、任務類型、既有標籤、定時迴圈（間隔／次數／結束日）
+- 由 **Google Gemini API 免費版**（`gemini-3.8-flash`，額度用完或忙碌時自動改用 `gemini-3.5-flash-lite`）解析成任務並自動判斷：日期（今天／明天／下週二…自動換算，沒提日期放 📥 暫存區）、時刻、預計時間與 blocks、分類（讀書／考試／工作／學習 → 💼 事業；家事／就醫／採買 → 🏠 生活必須；運動／休閒 → ⚡ 充電活動；回顧／反思 → 🔍 復盤）、任務類型、既有標籤、定時迴圈（間隔／次數／結束日）
 - **先預覽再加入**：每項顯示成卡片，可取消勾選、就地修改名稱／日期／時刻／分類／預計時間／任務類型、關閉迴圈，並附 AI 的判斷理由；按「加入勾選的 N 項」才寫入
 - **目前只能新增**：AI 不會讀取、修改或刪除既有任務（送出的只有你輸入的文字、今天日期與既有標籤名稱）。修改／刪除日後再逐步測試開放
-- **API Key**：到 console.anthropic.com 建立（需先儲值；每次解析費用極低），在視窗內貼上即可；Key 只存在這台裝置（`localStorage` 的 `todoAiApiKey`），**不進雲端同步與備份檔**，每台裝置需各自設定；可隨時「更換／清除」
-- 需連網使用；Key 無效、額度不足、太頻繁、離線等都會顯示中文提示
+- **API Key**：到 aistudio.google.com → Get API key 免費建立（不用綁信用卡），在視窗內貼上即可；Key 只存在這台裝置（`localStorage` 的 `todoGeminiApiKey`），**不進雲端同步與備份檔**，每台裝置需各自設定；可隨時「更換／清除」
+- ⚠️ **隱私**：免費版輸入的內容可能被 Google 用於改善產品，請勿輸入敏感資料
+- 免費額度依 Google AI Studio 顯示為準（aistudio.google.com/rate-limit）；兩個模型額度都用完時會提示稍後或明天再試
+- 需連網使用；Key 無效、額度用完、內容被擋、離線等都會顯示中文提示
+
 ### 其他功能
 - 📦 **壓縮任務** - 整理過期或已完成任務；完成超過 30 天的任務與逾期損失記錄會在開 App 時自動清除（`purgeOldData()`）
 - 🗑️ **清理已完成** - 批次刪除已完成任務
@@ -140,6 +143,14 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ## 版本歷史
 
+### v6.5.1 (2026-10-04) - 改用Gemini免費版
+- 🔁 **AI 改用 Google Gemini API 免費版**（使用者測試 Gemini 試用版後確認採用）：`_aiRequest()` 改呼叫 `models/{model}:generateContent`（`x-goog-api-key` 標頭；`systemInstruction`＋`generationConfig.responseMimeType: application/json`＋`responseJsonSchema`），讀 `candidates[0].content.parts` 的文字（略過 thought 部分）
+- ✅ **模型自動備援**：`AI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite']`，第一個回 429（免費額度用完／太頻繁）或 5xx 就改用下一個；全部 429 → 「今天的免費額度已用完」提示
+- ✅ **錯誤處理**：`promptFeedback.blockReason`、`finishReason` 為 SAFETY 等 → 內容被擋；`MAX_TOKENS` → 內容太長；400 API key 錯誤／401 → Key 無效；403 → 無權限
+- ✅ `_aiSchema()` 可空欄位改用 `type: [t, 'null']`；Key 設定區文案改為 AI Studio 申請方式並加註免費版隱私提醒；Key 存 `todoGeminiApiKey`（舊的 `todoAiApiKey` 不再使用）；Key 驗證改為長度 ≥ 20
+- ✅ 預覽卡片、只新增不修改／刪除、System prompt 與分類規則皆與 v6.5.0 相同
+- 💾 Claude 版 v6.5.0 備份為 `backups/TodoMaster_v6.5.0_2026-10-04.html`
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v6.5.1`
 ### v6.5.0 (2026-10-04) - 加入AI
 - ✨ **AI 新增任務**：頂欄新增「✨ AI」按鈕與 `#aiModal`；口語輸入 → 瀏覽器直接呼叫 Claude Messages API（`claude-haiku-4-5`，`anthropic-dangerous-direct-browser-access` 標頭，`output_config.format` JSON Schema 結構化輸出）→ 預覽卡片 → 勾選加入
 - ✅ **System prompt**：附今天起 21 天的日期與星期對照（換算「下週二」等）、四分類判斷規則（學業／考試歸 💼 事業）、預計時間與 blocks 換算（`BLOCK_MINUTES`）、任務類型、只能挑既有標籤、迴圈欄位規則
@@ -651,7 +662,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ```
 TodoMaster/
-├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.5.0)
+├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.5.1)
 ├── README.md                              ← 【指南】本維護文檔
 └── backups/
     ├── TodoMaster_v{版本}_{日期}.html     ← 【備份】完整版本備份
