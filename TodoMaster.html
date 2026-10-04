@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.2 - 任務管理工具</title>
+    <title>TodoMaster v6.5.3 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -746,6 +746,61 @@
             min-height: 80px;
         }
 
+        .form-select {
+            width: 100%;
+            padding: 8px 10px;
+            background-color: var(--bg-secondary);
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 0.95rem;
+        }
+
+        .multi-select {
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 6px;
+            background-color: var(--bg-secondary);
+        }
+        .multi-select summary {
+            padding: 8px 10px;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        .multi-select .checkbox-group {
+            padding: 4px 6px 8px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .now-line {
+            list-style: none;
+            position: relative;
+            height: 2px;
+            margin: 8px 0;
+            background-color: #3b82f6;
+            pointer-events: none;
+        }
+        .now-line::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: -4px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background-color: #3b82f6;
+        }
+        .now-line-label {
+            position: absolute;
+            right: 0;
+            top: -9px;
+            padding: 0 6px;
+            font-size: 0.7rem;
+            font-family: monospace;
+            color: #3b82f6;
+            background-color: var(--bg-primary);
+        }
+
         .radio-group,
         .checkbox-group {
             display: flex;
@@ -1098,7 +1153,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.2';
+        const APP_VERSION = 'v6.5.3';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1345,20 +1400,11 @@
 
                 <div class="form-group">
                     <label>預定日期</label>
-                    <div class="radio-group">
-                        <label class="radio-item">
-                            <input type="radio" name="dateMode" value="scheduled" checked>
-                            <span>具體日期</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="dateMode" value="unscheduled">
-                            <span>📥 暫存區（未排程，之後再排）</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="dateMode" value="unlimited">
-                            <span>不限期</span>
-                        </label>
-                    </div>
+                    <select id="dateMode" class="form-select">
+                        <option value="scheduled" selected>具體日期</option>
+                        <option value="unscheduled">📥 暫存區（未排程，之後再排）</option>
+                        <option value="unlimited">不限期</option>
+                    </select>
                     <div id="dateInputGroup" style="margin-top: 8px;">
                         <input type="date" id="taskDate" style="margin-bottom: 8px;">
                         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
@@ -1382,42 +1428,21 @@
 
                 <div class="form-group">
                     <label>釘選</label>
-                    <div class="radio-group">
-                        <label class="radio-item">
-                            <input type="radio" name="pinned" value="" checked>
-                            <span>無</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="pinned" value="top">
-                            <span>📌 置頂</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="pinned" value="bottom">
-                            <span>📌 置底</span>
-                        </label>
-                    </div>
+                    <select id="pinned" class="form-select">
+                        <option value="" selected>無</option>
+                        <option value="top">📌 置頂</option>
+                        <option value="bottom">📌 置底</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
                     <label>預計時間</label>
-                    <div class="radio-group">
-                        <label class="radio-item">
-                            <input type="radio" name="estimatedTime" value="10min" checked>
-                            <span>10 分鐘內</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="estimatedTime" value="30min">
-                            <span>30 分鐘 (1 block)</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="estimatedTime" value="30plus">
-                            <span>多 blocks (超過 30 分鐘)</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="estimatedTime" value="non-continuous">
-                            <span>非連續</span>
-                        </label>
-                    </div>
+                    <select id="estimatedTime" class="form-select">
+                        <option value="10min" selected>10 分鐘內</option>
+                        <option value="30min">30 分鐘 (1 block)</option>
+                        <option value="30plus">多 blocks (超過 30 分鐘)</option>
+                        <option value="non-continuous">非連續</option>
+                    </select>
                     <div id="blockSelectGroup" style="display: none; margin-top: 12px;">
                         <label>Block 數量（每 block = 30 分鐘）</label>
                         <div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;">
@@ -1430,47 +1455,29 @@
 
                 <div class="form-group">
                     <label>任務類型</label>
-                    <div class="radio-group">
-                        <label class="radio-item">
-                            <input type="radio" name="taskType" value="accumulative">
-                            <span>📈 累積型 — 賺得「實際－預定」</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="taskType" value="goal" checked>
-                            <span>🎯 任務型 — 提早賺得，超時延遲「預定－實際」</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="taskType" value="ahead">
-                            <span>⏭️ 超前部署 — 賺得「實際用時」</span>
-                        </label>
-                    </div>
+                    <select id="taskType" class="form-select">
+                        <option value="accumulative">📈 累積型 — 賺得「實際－預定」</option>
+                        <option value="goal" selected>🎯 任務型 — 提早賺得，超時延遲「預定－實際」</option>
+                        <option value="ahead">⏭️ 超前部署 — 賺得「實際用時」</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
                     <label>分類</label>
-                    <div class="radio-group">
-                        <label class="radio-item">
-                            <input type="radio" name="category" value="career" checked>
-                            <span>💼 事業</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="category" value="recharge">
-                            <span>⚡ 充電活動</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="category" value="life">
-                            <span>🏠 生活必須</span>
-                        </label>
-                        <label class="radio-item">
-                            <input type="radio" name="category" value="review">
-                            <span>🔍 復盤</span>
-                        </label>
-                    </div>
+                    <select id="category" class="form-select">
+                        <option value="career" selected>💼 事業</option>
+                        <option value="recharge">⚡ 充電活動</option>
+                        <option value="life">🏠 生活必須</option>
+                        <option value="review">🔍 復盤</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
                     <label>標籤</label>
-                    <div class="checkbox-group" id="tagCheckboxes"></div>
+                    <details class="multi-select" id="tagMulti">
+                        <summary id="tagSummary">未選擇</summary>
+                        <div class="checkbox-group" id="tagCheckboxes"></div>
+                    </details>
                 </div>
 
                 <div class="form-group">
@@ -1523,29 +1530,17 @@
                         </div>
                         <div class="form-group">
                             <label>週期設定方式</label>
-                            <div class="radio-group">
-                                <label class="radio-item">
-                                    <input type="radio" name="groupCycleMode" value="uniform" checked>
-                                    <span>統一（所有任務間隔相同，改一個自動同步）</span>
-                                </label>
-                                <label class="radio-item">
-                                    <input type="radio" name="groupCycleMode" value="individual">
-                                    <span>個別設定（各任務自訂天數，依序累加排程）</span>
-                                </label>
-                            </div>
+                            <select id="groupCycleMode" class="form-select">
+                        <option value="uniform" selected>統一（所有任務間隔相同，改一個自動同步）</option>
+                        <option value="individual">個別設定（各任務自訂天數，依序累加排程）</option>
+                    </select>
                         </div>
                         <div class="form-group">
                             <label>延後設定方式</label>
-                            <div class="radio-group">
-                                <label class="radio-item">
-                                    <input type="radio" name="groupDelayMode" value="fixed" checked>
-                                    <span>固定日期（逾期重新安排到今天不影響後續任務，僅拖曳排序時重算）</span>
-                                </label>
-                                <label class="radio-item">
-                                    <input type="radio" name="groupDelayMode" value="auto">
-                                    <span>自動延後（逾期重新安排到今天後，後續任務日期一併重新計算）</span>
-                                </label>
-                            </div>
+                            <select id="groupDelayMode" class="form-select">
+                        <option value="fixed" selected>固定日期（逾期重新安排到今天不影響後續任務，僅拖曳排序時重算）</option>
+                        <option value="auto">自動延後（逾期重新安排到今天後，後續任務日期一併重新計算）</option>
+                    </select>
                         </div>
                         <div class="form-group">
                             <label>此群組內順序</label>
@@ -2794,6 +2789,7 @@
                     this.updateUI();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
+                    setInterval(() => this._placeNowLine(), 60000);
                     this._consumeSetupHash();
                     this.cloud.start();
                 } catch (e) {
@@ -3235,6 +3231,13 @@
                     label.appendChild(document.createTextNode(tag));
                     tagCheckboxes.appendChild(label);
                 });
+                this.updateTagSummary();
+            }
+
+            // 標籤下拉的摘要文字（顯示已選標籤）
+            updateTagSummary() {
+                const picked = [...document.querySelectorAll('.tag-checkbox:checked')].map(el => el.value);
+                document.getElementById('tagSummary').textContent = picked.length ? `已選 ${picked.length} 項：${picked.join('、')}` : '未選擇';
             }
 
             renderTasks() {
@@ -3280,9 +3283,34 @@
                         .forEach(sub => li.parentElement.appendChild(this._createSubtaskCard(sub)));
                 });
 
-                if (ctx.isSectionView) this._finalizeSections(totals, sections);
+                if (ctx.isSectionView) {
+                    this._finalizeSections(totals, sections);
+                    this._placeNowLine();
+                }
 
                 // dragover / drop 監聽器統一由 setupEventListeners 綁定一次，此處不重複綁定
+            }
+
+            // 現在時間藍線（v6.5.3）：插在「今天」任務之間；時刻 >= 現在的任務在線下方，其餘（含未指定時刻）在線上方
+            _placeNowLine() {
+                document.querySelectorAll('#taskList .now-line').forEach(el => el.remove());
+                const cards = PERIOD_ORDER.flatMap(p => {
+                    const ol = document.getElementById(`taskList-today-${p}`);
+                    return ol ? [...ol.querySelectorAll(':scope > .task-item:not(.subtask)')] : [];
+                });
+                if (cards.length === 0) return;
+                const d = new Date();
+                const nowStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                const line = document.createElement('li');
+                line.className = 'now-line';
+                line.setAttribute('aria-label', `現在時間 ${nowStr}`);
+                line.innerHTML = `<span class="now-line-label">${nowStr}</span>`;
+                const next = cards.find(li => {
+                    const t = this.getTaskById(li.dataset.taskId);
+                    return t && t.time && t.time >= nowStr;
+                });
+                if (next) next.parentElement.insertBefore(line, next);
+                else cards[cards.length - 1].after(line);
             }
 
             // 單日分區內的早上/下午/晚上三段子清單 HTML（今天/明天/後天共用）
@@ -3893,17 +3921,17 @@
 
                     // 設置日期默認為今天並選中「具體日期」模式
                     const today = localDateStr();
-                    document.querySelector('input[name="dateMode"][value="scheduled"]').checked = true;
+                    document.getElementById('dateMode').value = 'scheduled';
                     document.getElementById('taskDate').value = today;
                     document.getElementById('dateInputGroup').style.display = 'block';
                     document.getElementById('taskTime').value = '';
 
                     // 設置預計時間為 10min 並隱藏 block 選擇
-                    document.querySelector('input[name="estimatedTime"][value="10min"]').checked = true;
+                    document.getElementById('estimatedTime').value = '10min';
                     document.getElementById('blockSelectGroup').style.display = 'none';
 
                     // 預設任務類型為 goal
-                    document.querySelector('input[name="taskType"][value="goal"]').checked = true;
+                    document.getElementById('taskType').value = 'goal';
                 });
 
                 // 提交任務表單
@@ -3914,11 +3942,9 @@
                 });
 
                 // 預計時間選項
-                document.querySelectorAll('input[name="estimatedTime"]').forEach(radio => {
-                    radio.addEventListener('change', (e) => {
-                        const blockSelectGroup = document.getElementById('blockSelectGroup');
-                        blockSelectGroup.style.display = e.target.value === '30plus' ? 'block' : 'none';
-                    });
+                document.getElementById('estimatedTime').addEventListener('change', (e) => {
+                    const blockSelectGroup = document.getElementById('blockSelectGroup');
+                    blockSelectGroup.style.display = e.target.value === '30plus' ? 'block' : 'none';
                 });
 
                 // Block 數量即時試算
@@ -3984,24 +4010,25 @@
                     }
                 });
 
-                // 日期模式選項
-                document.querySelectorAll('input[name="dateMode"]').forEach(radio => {
-                    radio.addEventListener('change', (e) => {
-                        const dateInputGroup = document.getElementById('dateInputGroup');
-                        const dateMode = e.target.value;
+                // 標籤下拉：勾選時更新摘要
+                document.getElementById('tagCheckboxes').addEventListener('change', () => this.updateTagSummary());
 
-                        if (dateMode === 'scheduled') {
-                            dateInputGroup.style.display = 'block';
-                            const taskDateInput = document.getElementById('taskDate');
-                            if (!taskDateInput.value) {
-                                taskDateInput.value = localDateStr();
-                            }
-                        } else {
-                            dateInputGroup.style.display = 'none';
-                            document.getElementById('taskDate').value = '';
-                            document.getElementById('taskTime').value = '';
+                // 日期模式選項
+                document.getElementById('dateMode').addEventListener('change', (e) => {
+                    const dateInputGroup = document.getElementById('dateInputGroup');
+                    const dateMode = e.target.value;
+
+                    if (dateMode === 'scheduled') {
+                        dateInputGroup.style.display = 'block';
+                        const taskDateInput = document.getElementById('taskDate');
+                        if (!taskDateInput.value) {
+                            taskDateInput.value = localDateStr();
                         }
-                    });
+                    } else {
+                        dateInputGroup.style.display = 'none';
+                        document.getElementById('taskDate').value = '';
+                        document.getElementById('taskTime').value = '';
+                    }
                 });
 
                 // 快速日期選擇按鈕
@@ -4242,20 +4269,20 @@
                 } else if (task.date === '9999-12-31') {
                     dateMode = 'unlimited';
                 }
-                document.querySelector(`input[name="dateMode"][value="${dateMode}"]`).checked = true;
+                document.getElementById('dateMode').value = dateMode;
                 document.getElementById('taskDate').value = task.date || '';
                 document.getElementById('taskTime').value = task.time || '';
                 document.getElementById('dateInputGroup').style.display = dateMode === 'scheduled' ? 'block' : 'none';
 
                 // 設置釘選狀態
-                document.querySelector(`input[name="pinned"][value="${task.pinned || ''}"]`).checked = true;
+                document.getElementById('pinned').value = task.pinned || '';
 
                 // 設置預計時間和 blocks
-                document.querySelector(`input[name="estimatedTime"][value="${task.estimatedTime}"]`).checked = true;
+                document.getElementById('estimatedTime').value = task.estimatedTime;
 
                 // 設置任務類型
                 const taskTypeVal = task.taskType || 'goal';
-                document.querySelector(`input[name="taskType"][value="${taskTypeVal}"]`).checked = true;
+                document.getElementById('taskType').value = taskTypeVal;
                 const blockSelectGroup = document.getElementById('blockSelectGroup');
                 if (task.estimatedTime === '30plus') {
                     blockSelectGroup.style.display = 'block';
@@ -4267,7 +4294,7 @@
                     blockSelectGroup.style.display = 'none';
                 }
 
-                document.querySelector(`input[name="category"][value="${task.category}"]`).checked = true;
+                document.getElementById('category').value = task.category;
 
                 document.getElementById('taskRecurring').checked = task.recurring && task.recurring.enabled;
                 document.getElementById('recurringOptions').style.display = task.recurring && task.recurring.enabled ? 'block' : 'none';
@@ -4346,13 +4373,11 @@
                 });
 
                 const setCycleModeRadio = (mode) => {
-                    const radio = document.querySelector(`input[name="groupCycleMode"][value="${mode}"]`);
-                    if (radio) radio.checked = true;
+                    document.getElementById('groupCycleMode').value = mode;
                 };
 
                 const setDelayModeRadio = (mode) => {
-                    const radio = document.querySelector(`input[name="groupDelayMode"][value="${mode}"]`);
-                    if (radio) radio.checked = true;
+                    document.getElementById('groupDelayMode').value = mode;
                 };
 
                 // 監聽選擇變化
@@ -5068,7 +5093,7 @@
                     fn();
                 };
                 document.getElementById('conflictApplyBtn').onclick = () => {
-                    const mode = document.querySelector('input[name="conflictMode"]:checked').value;
+                    const mode = document.getElementById('conflictMode').value;
                     finish(() => opts.onApply(mode));
                 };
                 document.getElementById('conflictLaterBtn').onclick = () => finish(() => opts.onLater());
@@ -5897,7 +5922,7 @@
                 }
 
                 // 處理日期
-                const dateMode = document.querySelector('input[name="dateMode"]:checked').value;
+                const dateMode = document.getElementById('dateMode').value;
                 let date = '';
                 if (dateMode === 'scheduled') {
                     date = document.getElementById('taskDate').value;
@@ -5909,7 +5934,7 @@
                 // 當天時刻（僅具體日期適用）
                 const time = (dateMode === 'scheduled') ? (document.getElementById('taskTime').value || null) : null;
 
-                const estimatedTime = document.querySelector('input[name="estimatedTime"]:checked').value;
+                const estimatedTime = document.getElementById('estimatedTime').value;
                 let blocks = null;
                 if (estimatedTime === '30plus') {
                     blocks = parseInt(document.getElementById('blockSelect').value);
@@ -5924,15 +5949,15 @@
                     blocks: blocks,
                     completedBlocks: 0,
                     blockTimes: [],
-                    category: document.querySelector('input[name="category"]:checked').value,
-                    taskType: document.querySelector('input[name="taskType"]:checked')?.value || 'goal',
+                    category: document.getElementById('category').value,
+                    taskType: document.getElementById('taskType').value || 'goal',
                     tags: Array.from(document.querySelectorAll('.tag-checkbox:checked')).map(el => el.value),
                     recurring: null,
                     groupId: null,
                     groupOrder: null,
                     actualTime: document.getElementById('actualTime').value ? parseInt(document.getElementById('actualTime').value) : null,
                     nextStepNotes: null,
-                    pinned: document.querySelector('input[name="pinned"]:checked')?.value || null
+                    pinned: document.getElementById('pinned').value || null
                 };
 
                 if (document.getElementById('taskRecurring').checked) {
@@ -5969,8 +5994,8 @@
 
                     taskData.groupId = groupId;
                     taskData.groupName = groupName;
-                    taskData.groupCycleMode = document.querySelector('input[name="groupCycleMode"]:checked')?.value || 'uniform';
-                    taskData.groupDelayMode = document.querySelector('input[name="groupDelayMode"]:checked')?.value || 'fixed';
+                    taskData.groupCycleMode = document.getElementById('groupCycleMode').value || 'uniform';
+                    taskData.groupDelayMode = document.getElementById('groupDelayMode').value || 'fixed';
                     // 編輯既有任務且群組未更換時，保留原本的 groupOrder；其餘情況排到最後
                     if (this.currentEditingTask && this.currentEditingTask.groupId === groupId) {
                         taskData.groupOrder = this.currentEditingTask.groupOrder;
