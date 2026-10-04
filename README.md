@@ -5,7 +5,7 @@
 此資料夾用於 **Claude Code 維護和開發 TodoMaster 應用**。
 
 **主應用**：`TodoMaster.html`  
-**版本**：6.5.1 (2026-10-04)  
+**版本**：6.5.2 (2026-10-04)  
 **狀態**：✅ 穩定版本  
 **責任方**：Claude Code
 
@@ -142,6 +142,14 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 ---
 
 ## 版本歷史
+
+### v6.5.2 (2026-10-04) - 顯示功能微調
+- 🕒 **未指定時間區塊**：沒設定當天時刻的任務，從「早上」分出來，放進獨立的「🕒 未指定時間」區塊（排在早上之前）；拖進該區會清除時刻（`getTimePeriod()`／`computeDropTime()`）
+- ⏱️ **重排時連動調整時間**：拖曳任務後，原位置後面「時間連續」（前一張結束＝下一張開始）的任務自動提前，新位置後面連續的任務自動延後；有空檔（不連續）者不動（`reflowOnMove()`）
+- 🧩 **子任務**：主任務編輯視窗新增「子任務」區（標題＋預計時間），子任務在主任務下縮排一級顯示，只有標題與預計時間；不可獨立拖曳、不計入時數／完成統計；刪除主任務連帶刪除、複製主任務連帶複製（`parentId` 欄位）
+- 🤖 **AI 解析比對既有任務**：System prompt 附上未完成既有任務標題，AI 判斷相似（如「運動-拉筋運動」）時於預覽備註顯示「⚠️ 目前已有任務「XXX」，請確認是否新增」（`duplicateOf`，只接受確實存在的標題）
+- 💾 v6.5.1 備份為 `backups/TodoMaster_v6.5.1_2026-10-04.html`
+- ✅ sw.js CACHE_NAME 更新為 `todomaster-v6.5.2`
 
 ### v6.5.1 (2026-10-04) - 改用Gemini免費版
 - 🔁 **AI 改用 Google Gemini API 免費版**（使用者測試 Gemini 試用版後確認採用）：`_aiRequest()` 改呼叫 `models/{model}:generateContent`（`x-goog-api-key` 標頭；`systemInstruction`＋`generationConfig.responseMimeType: application/json`＋`responseJsonSchema`），讀 `candidates[0].content.parts` 的文字（略過 thought 部分）
@@ -662,7 +670,7 @@ Claude Code 作為 AI 協助工具，根據使用者的功能要求，進行以�
 
 ```
 TodoMaster/
-├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.5.1)
+├── TodoMaster.html                        ← 【主文件】當前應用版本 (v6.5.2)
 ├── README.md                              ← 【指南】本維護文檔
 └── backups/
     ├── TodoMaster_v{版本}_{日期}.html     ← 【備份】完整版本備份

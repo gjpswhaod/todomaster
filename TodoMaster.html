@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.1 - 任務管理工具</title>
+    <title>TodoMaster v6.5.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -499,6 +499,22 @@
             text-transform: none;
         }
         .reschedule-all-btn:hover { background: rgba(255, 107, 107, 0.28); }
+
+        /* 子任務：縮排一級的精簡卡片，只有標題與預計時間 */
+        .task-item.subtask {
+            margin-left: 28px;
+            padding: 8px 12px;
+            grid-template-columns: 1fr;
+            border-left: 3px solid var(--accent-primary);
+        }
+        .ai-dup { color: #f59f00; font-weight: 600; }
+        .subtask-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+        .subtask-row .task-title { flex: 1; font-size: 0.9rem; }
+        .subtask-time { color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; }
+        .subtask-edit-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .subtask-edit-row .subtask-edit-title { flex: 1; cursor: pointer; }
+        .subtask-add-row { display: flex; gap: 6px; flex-wrap: wrap; }
+        .subtask-add-row input[type=text] { flex: 1; min-width: 120px; }
 
         .task-item.completed {
             opacity: 0.6;
@@ -1082,7 +1098,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.1';
+        const APP_VERSION = 'v6.5.2';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1108,10 +1124,10 @@
         const AI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
         const AI_KEY_STORAGE = 'todoGeminiApiKey';
         // 一天三時段：分界（分鐘數下界）與拖曳落在該段最前面時的預設時刻
-        const PERIOD_ORDER = ['morning', 'afternoon', 'evening'];
+        const PERIOD_ORDER = ['unspecified', 'morning', 'afternoon', 'evening'];
         const PERIOD_BOUNDS = { morning: 0, afternoon: 12 * 60, evening: 18 * 60 };
-        const PERIOD_DEFAULT_TIME = { morning: '08:00', afternoon: '13:00', evening: '19:00' };
-        const PERIOD_LABELS = { morning: '🌄 早上', afternoon: '🌇 下午', evening: '🌙 晚上' };
+        const PERIOD_DEFAULT_TIME = { unspecified: null, morning: '08:00', afternoon: '13:00', evening: '19:00' };
+        const PERIOD_LABELS = { unspecified: '🕒 未指定時間', morning: '🌄 早上', afternoon: '🌇 下午', evening: '🌙 晚上' };
 
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1163,6 +1179,10 @@
         }
 
         // 暫存區 = 未排程（無日期、未壓縮）；「不限期」9999-12-31 不算暫存
+        // 子任務：掛在主任務下的拆解項目，不獨立列入統計與時間計算
+        function isSubtask(task) {
+            return !!task.parentId;
+        }
         function isStagedTask(task) {
             return !task.compressed && (!task.date || task.date === '');
         }
@@ -1178,10 +1198,10 @@
             const v = Math.max(0, Math.min(23 * 60 + 59, Math.round(mins)));
             return `${String(Math.floor(v / 60)).padStart(2, '0')}:${String(v % 60).padStart(2, '0')}`;
         }
-        // 依 task.time 判斷屬於當天哪個時段；無時刻 → 早上（沿用「未指定時刻排最前」慣例，侷限在早上段）
+        // 依 task.time 判斷屬於當天哪個時段；無時刻 → 未指定時間（獨立區塊，排在早上之前）
         function getTimePeriod(time) {
             const mins = timeToMinutes(time);
-            if (mins === null) return 'morning';
+            if (mins === null) return 'unspecified';
             if (mins < PERIOD_BOUNDS.afternoon) return 'morning';
             if (mins < PERIOD_BOUNDS.evening) return 'afternoon';
             return 'evening';
@@ -1531,6 +1551,22 @@
                             <label>此群組內順序</label>
                             <div id="groupOrderDisplay" style="padding: 10px; background-color: var(--bg-tertiary); border-radius: 6px; color: var(--text-secondary);"></div>
                         </div>
+                    </div>
+                </div>
+
+                <div class="form-group" id="subtaskGroup" style="display: none;">
+                    <label>子任務（只記標題與預計時間）</label>
+                    <div id="subtaskEditList"></div>
+                    <div class="subtask-add-row">
+                        <input type="text" id="subtaskTitleInput" placeholder="子任務名稱">
+                        <select id="subtaskTimeSelect">
+                            <option value="10min">⏱️ 10分鐘</option>
+                            <option value="30min">⏲️ 30分鐘</option>
+                            <option value="30plus:2">⏳ 1小時</option>
+                            <option value="30plus:4">⏳ 2小時</option>
+                            <option value="non-continuous">🔀 非連續</option>
+                        </select>
+                        <button type="button" class="btn btn-secondary btn-small" id="subtaskAddBtn">＋ 新增</button>
                     </div>
                 </div>
 
@@ -2754,6 +2790,7 @@
                     this.setupEventListeners();
                     this.setupSyncListeners();
                     this.setupAiListeners();
+                    this.setupSubtaskListeners();
                     this.updateUI();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
@@ -2949,8 +2986,110 @@
             }
 
             deleteTask(id) {
-                this.tasks = this.tasks.filter(t => t.id !== id);
+                this.tasks = this.tasks.filter(t => t.id !== id && t.parentId !== id);
                 this.saveToStorage();
+            }
+
+            // ===== 子任務 =====
+            getSubtasks(parentId) {
+                return this.tasks.filter(t => t.parentId === parentId);
+            }
+
+            _createSubtaskCard(sub) {
+                const li = document.createElement('li');
+                li.className = 'task-item subtask fade-in' + (sub.completed ? ' completed' : '');
+                li.draggable = false;
+                li.dataset.taskId = sub.id;
+                const meta = TIME_META[sub.estimatedTime];
+                const timeText = sub.estimatedTime === '30plus' && sub.blocks
+                    ? `${sub.blocks * BLOCK_MINUTES}分鐘` : (meta?.label || '');
+                li.innerHTML = `
+                    <div class="subtask-row">
+                        <input type="checkbox" class="task-checkbox" ${sub.completed ? 'checked' : ''}>
+                        <span class="task-title">${this.escapeHtml(sub.title)}</span>
+                        <span class="subtask-time">${meta?.emoji || ''} ${timeText}</span>
+                    </div>`;
+                const checkbox = li.querySelector('.task-checkbox');
+                checkbox.addEventListener('click', e => e.stopPropagation());
+                checkbox.addEventListener('change', () => {
+                    this.updateTask(sub.id, checkbox.checked
+                        ? { completed: true }
+                        : { completed: false, completedAt: null, completedDate: null });
+                    this.updateUI();
+                });
+                li.addEventListener('click', () => this.openEditModal(sub.parentId));
+                return li;
+            }
+
+            renderSubtaskEditor() {
+                const task = this.currentEditingTask;
+                const box = document.getElementById('subtaskEditList');
+                if (!task || isSubtask(task)) { box.innerHTML = ''; return; }
+                box.innerHTML = this.getSubtasks(task.id).map(sub => {
+                    const meta = TIME_META[sub.estimatedTime];
+                    const t = sub.estimatedTime === '30plus' && sub.blocks ? `${sub.blocks * BLOCK_MINUTES}分鐘` : meta?.label;
+                    return `<div class="subtask-edit-row" data-sub-id="${sub.id}">
+                        <span class="subtask-edit-title" title="點擊改名">${this.escapeHtml(sub.title)}</span>
+                        <span class="subtask-time">${meta?.emoji || ''} ${t}</span>
+                        <button type="button" class="btn btn-danger btn-small subtask-del">✕</button>
+                    </div>`;
+                }).join('');
+                box.querySelectorAll('.subtask-edit-row').forEach(row => {
+                    const id = row.dataset.subId;
+                    row.querySelector('.subtask-del').addEventListener('click', () => {
+                        this.deleteTask(id);
+                        this.renderSubtaskEditor();
+                        this.updateUI();
+                    });
+                    row.querySelector('.subtask-edit-title').addEventListener('click', () => {
+                        const sub = this.getTaskById(id);
+                        const name = prompt('子任務名稱', sub.title);
+                        if (name && name.trim()) {
+                            this.updateTask(id, { title: name.trim().slice(0, 200) });
+                            this.renderSubtaskEditor();
+                            this.updateUI();
+                        }
+                    });
+                });
+            }
+
+            addSubtaskFromEditor() {
+                const parent = this.currentEditingTask;
+                if (!parent || isSubtask(parent)) return;
+                const input = document.getElementById('subtaskTitleInput');
+                const title = input.value.trim();
+                if (!title) { input.focus(); return; }
+                const [estimatedTime, blocksStr] = document.getElementById('subtaskTimeSelect').value.split(':');
+                this.addTask({
+                    parentId: parent.id,
+                    title: title.slice(0, 200),
+                    description: '',
+                    date: '',
+                    time: null,
+                    estimatedTime,
+                    blocks: blocksStr ? Number(blocksStr) : null,
+                    completedBlocks: 0,
+                    blockTimes: [],
+                    category: parent.category,
+                    taskType: 'goal',
+                    tags: [],
+                    recurring: null,
+                    groupId: null,
+                    groupOrder: null,
+                    actualTime: null,
+                    nextStepNotes: null,
+                    pinned: null
+                });
+                input.value = '';
+                this.renderSubtaskEditor();
+                this.updateUI();
+            }
+
+            setupSubtaskListeners() {
+                document.getElementById('subtaskAddBtn').addEventListener('click', () => this.addSubtaskFromEditor());
+                document.getElementById('subtaskTitleInput').addEventListener('keydown', e => {
+                    if (e.key === 'Enter') { e.preventDefault(); this.addSubtaskFromEditor(); }
+                });
             }
 
             buildCompletionUpdates(task) {
@@ -2980,7 +3119,7 @@
 
             // ===== 過濾和排序 =====
             getFilteredTasks() {
-                let filtered = [...this.tasks];
+                let filtered = this.tasks.filter(t => !isSubtask(t));
 
                 if (this.currentFilter.startsWith('category:')) {
                     const category = this.currentFilter.split(':')[1];
@@ -3135,6 +3274,10 @@
                     if (task.compressed) return;
                     const li = this._createTaskCard(task, ctx);
                     this._placeCard(li, task, sections, ctx);
+                    // 子任務緊接在主任務下方（同一清單）
+                    this.getSubtasks(task.id)
+                        .filter(sub => this.showCompleted || !sub.completed)
+                        .forEach(sub => li.parentElement.appendChild(this._createSubtaskCard(sub)));
                 });
 
                 if (ctx.isSectionView) this._finalizeSections(totals, sections);
@@ -3204,11 +3347,8 @@
                     });
                 });
 
-                const periodMap = dayKey => ({
-                    morning: document.getElementById(`taskList-${dayKey}-morning`),
-                    afternoon: document.getElementById(`taskList-${dayKey}-afternoon`),
-                    evening: document.getElementById(`taskList-${dayKey}-evening`)
-                });
+                const periodMap = dayKey => Object.fromEntries(
+                    PERIOD_ORDER.map(p => [p, document.getElementById(`taskList-${dayKey}-${p}`)]));
 
                 const sections = {
                     staging: document.getElementById('taskList-staging'),
@@ -3258,7 +3398,7 @@
                 };
                 this.tasks.forEach(task => {
                     // 暫存任務不列入任何時數統計
-                    if (isStagedTask(task)) return;
+                    if (isStagedTask(task) || isSubtask(task)) return;
                     // 已壓縮任務一律視為已完成，且無逾期疑慮；缺少 date 的舊壓縮資料以 completedDate 近似定位
                     const bucketDate = task.date || (task.compressed ? task.completedDate : null);
                     if (isTaskOverdue(task, todayMidnight)) return;
@@ -3542,7 +3682,7 @@
             }
 
             getDragAfterElement(container, y) {
-                const draggableElements = [...container.querySelectorAll('.task-item:not(.dragging)')];
+                const draggableElements = [...container.querySelectorAll('.task-item:not(.dragging):not(.subtask)')];
                 return draggableElements.reduce((closest, child) => {
                     const box = child.getBoundingClientRect();
                     const offset = y - box.top - box.height / 2;
@@ -3559,6 +3699,7 @@
             // 找不到（落在子清單最前面、或往前都是未指定時刻的卡）→ 回退為該時段預設時刻，結果保證非 null。
             computeDropTime(draggingEl) {
                 const period = draggingEl.closest('.section-task-list')?.dataset.period || 'morning';
+                if (period === 'unspecified') return null;   // 拖進未指定時間：清除時刻
                 let node = draggingEl.previousElementSibling;
                 while (node) {
                     if (node.classList.contains('task-item')) {
@@ -3572,12 +3713,43 @@
                 return PERIOD_DEFAULT_TIME[period];
             }
 
+            // 拖曳後連動調整時間（v6.5.2）：「連續」＝前一張結束時刻（time＋預計分鐘）等於下一張開始時刻。
+            // 移出端：被拖卡原位置後面連續的一串卡提前 dur；移入端：新位置時刻起連續的一串卡延後 dur。
+            // 遇到第一個不連續（有空檔）即停；子任務、無時刻、預計 0 分鐘的任務不位移。回傳被連動調整的任務數。
+            reflowOnMove(task, oldDate, oldTime, newTime) {
+                const dur = getTaskPlannedMinutes(task);
+                if (dur <= 0) return 0;
+                const shifts = new Map();   // id → 新分鐘數
+                const dayTasks = date => this.tasks
+                    .filter(t => t.id !== task.id && t.date === date && t.time && !isSubtask(t) && !t.compressed);
+                const effective = t => shifts.has(t.id) ? shifts.get(t.id) : timeToMinutes(t.time);
+                const chain = (date, startMin, delta) => {
+                    const list = dayTasks(date).filter(t => effective(t) >= startMin)
+                        .sort((a, b) => effective(a) - effective(b));
+                    let cur = startMin;
+                    for (const n of list) {
+                        const t = effective(n);
+                        if (t < cur) continue;        // 重疊：不處理
+                        if (t > cur) break;           // 有空檔：連續中斷
+                        cur = t + getTaskPlannedMinutes(n);
+                        shifts.set(n.id, Math.max(0, t + delta));
+                    }
+                };
+                const oldMin = timeToMinutes(oldTime);
+                if (oldDate && oldMin !== null) chain(oldDate, oldMin + dur, -dur);
+                const newMin = timeToMinutes(newTime);
+                if (task.date && newMin !== null) chain(task.date, newMin, dur);
+                shifts.forEach((mins, id) => this.updateTask(id, { time: minutesToTime(mins) }));
+                if (shifts.size) this.showNotification(`⏱️ 已連動調整 ${shifts.size} 項任務時間`);
+                return shifts.size;
+            }
+
             saveTaskOrder() {
                 // 三區塊視圖下從各 section list 收集任務
                 const isSectionView = this.currentFilter === 'all' && document.querySelector('.section-task-list');
                 const taskItems = isSectionView
-                    ? document.querySelectorAll('.section-task-list .task-item')
-                    : document.querySelectorAll('#taskList .task-item');
+                    ? document.querySelectorAll('.section-task-list .task-item:not(.subtask)')
+                    : document.querySelectorAll('#taskList .task-item:not(.subtask)');
                 const isGroupView = this.currentFilter.startsWith('group:');
                 const groupId = isGroupView ? this.currentFilter.split(':')[1] : null;
 
@@ -3603,7 +3775,7 @@
             updateStats() {
                 const statsContainer = document.getElementById('statsContainer');
                 // 暫存任務不列入任何統計
-                const allTasks = this.tasks.filter(t => !t.compressed && !isStagedTask(t));
+                const allTasks = this.tasks.filter(t => !t.compressed && !isStagedTask(t) && !isSubtask(t));
                 const todayStr = localDateStr();
                 const todayMidnight = getTodayMidnight();
 
@@ -3713,6 +3885,7 @@
                     document.getElementById('deleteTaskBtn').style.display = 'none';
                     document.getElementById('duplicateTaskBtn').style.display = 'none';
                     document.getElementById('actualTimeGroup').style.display = 'none';
+                    document.getElementById('subtaskGroup').style.display = 'none';
                     document.getElementById('taskRecurring').checked = false;
                     document.getElementById('recurringOptions').style.display = 'none';
                     document.getElementById('taskGroup').checked = false;
@@ -3940,6 +4113,8 @@
                                 const tomorrowStr = addDaysToDate(todayStr, 1);
                                 const dayAfterStr = addDaysToDate(todayStr, 2);
                                 const task = this.getTaskById(taskId);
+                                const oldDate = task ? task.date : null;
+                                const oldTime = task ? task.time : null;
 
                                 if (sectionType === 'staging') {
                                     if (task && task.date) {
@@ -3972,13 +4147,15 @@
                                     }
                                 }
 
-                                // 有具體日期的三個區塊：依落點前一張卡推算並寫入時刻
-                                if (['today', 'tomorrow', 'dayafter'].includes(sectionType) && task) {
-                                    const newTime = this.computeDropTime(draggingEl);
-                                    if (newTime !== (task.time || null)) {
+                                // 有具體日期的三個區塊：依落點前一張卡推算並寫入時刻，並連動調整前後「原本連續」的任務
+                                if (task) {
+                                    const dated = ['today', 'tomorrow', 'dayafter'].includes(sectionType);
+                                    const newTime = dated ? this.computeDropTime(draggingEl) : (sectionType === 'staging' ? null : task.time || null);
+                                    if (dated && newTime !== (task.time || null)) {
                                         this.updateTask(taskId, { time: newTime });
                                         sectionChanged = true;
                                     }
+                                    if (this.reflowOnMove(task, oldDate, oldTime, dated ? newTime : null)) sectionChanged = true;
                                 }
                             }
                         }
@@ -4108,6 +4285,10 @@
 
                 document.getElementById('actualTimeGroup').style.display = 'block';
                 document.getElementById('actualTime').value = task.actualTime || '';
+
+                // 子任務只能在頂層主任務的編輯視窗管理
+                document.getElementById('subtaskGroup').style.display = isSubtask(task) ? 'none' : 'block';
+                this.renderSubtaskEditor();
 
                 // 顯示下一步建議欄位（如果有實際時間或已完成）
                 if (task.actualTime || task.completed) {
@@ -4539,7 +4720,7 @@
             compressCompletedTasks() {
                 let count = 0;
                 this.tasks = this.tasks.map(task => {
-                    if (!task.completed || task.compressed) return task;
+                    if (!task.completed || task.compressed || isSubtask(task)) return task;
                     count++;
 
                     // 預計時間（分鐘）
@@ -4964,6 +5145,18 @@
                 msg.className = 'sync-msg' + (cls ? ' ' + cls : '');
             }
 
+            // 既有任務標題（未完成、非子任務、未壓縮；去重，最多 200 筆）：供 AI 比對重複
+            _aiExistingTitles() {
+                const seen = new Set();
+                for (const t of this.tasks) {
+                    if (t.completed || t.compressed || isSubtask(t)) continue;
+                    const title = String(t.title || '').trim().slice(0, 60);
+                    if (title) seen.add(title);
+                    if (seen.size >= 200) break;
+                }
+                return [...seen];
+            }
+
             _aiSystemPrompt() {
                 const wd = ['日', '一', '二', '三', '四', '五', '六'];
                 const today = new Date();
@@ -4973,6 +5166,7 @@
                     days.push(`${localDateStr(d)}（週${wd[d.getDay()]}）`);
                 }
                 const tags = this.tags.length ? this.tags.join('、') : '（目前沒有標籤）';
+                const existing = this._aiExistingTitles();
                 return [
                     '你是待辦清單 App「TodoMaster」的任務建立助手。使用者會用口語描述想做的事，請把它整理成要「新增」的任務清單。你只能新增任務，不能修改或刪除任何既有任務。',
                     '',
@@ -4993,6 +5187,9 @@
                     `- tags：只能從既有標籤中挑選完全相符的名稱：${tags}。沒有適合的就空陣列，不要自創標籤。`,
                     '- 重複性任務（每天、每3天、每週…）：recurringInterval 填間隔天數（每天 1、每週 7）；提到次數填 recurringCount；提到結束日期填 recurringUntil（YYYY-MM-DD）；不知道就 null。重複任務必須是 scheduled，沒說從哪天開始就從今天開始。非重複任務這三欄都是 null。',
                     '- reason：用一句繁體中文簡述你為何這樣分類與設定（給使用者確認用）。',
+                    existing.length
+                        ? `- duplicateOf：目前未完成的既有任務標題有：${existing.map(t => `「${t}」`).join('')}。若新任務與其中某個標題相同或高度相似（例：「運動-拉筋運動」與「拉筋」），填該既有標題（必須與清單中的文字完全一致）；沒有相似的就填 null。你仍要照常產出這個任務，只是標註。`
+                        : '- duplicateOf：目前沒有既有任務，一律填 null。',
                     '',
                     '一段話裡有多件事就拆成多個任務；同一件事不要重複。若內容完全不是可做的事，回傳空的 tasks 陣列。'
                 ].join('\n');
@@ -5011,7 +5208,7 @@
                                 type: 'object',
                                 additionalProperties: false,
                                 required: ['title', 'description', 'dateMode', 'date', 'time', 'estimatedTime', 'blocks',
-                                    'category', 'taskType', 'tags', 'recurringInterval', 'recurringCount', 'recurringUntil', 'reason'],
+                                    'category', 'taskType', 'tags', 'recurringInterval', 'recurringCount', 'recurringUntil', 'reason', 'duplicateOf'],
                                 properties: {
                                     title: { type: 'string' },
                                     description: { type: 'string' },
@@ -5026,7 +5223,8 @@
                                     recurringInterval: nullable('integer'),
                                     recurringCount: nullable('integer'),
                                     recurringUntil: nullable('string'),
-                                    reason: { type: 'string' }
+                                    reason: { type: 'string' },
+                                    duplicateOf: nullable('string')
                                 }
                             }
                         }
@@ -5116,7 +5314,9 @@
                     taskType: TASK_TYPE_META[d.taskType] ? d.taskType : 'goal',
                     tags: Array.isArray(d.tags) ? [...new Set(d.tags.filter(t => this.tags.includes(t)))] : [],
                     recurring,
-                    reason: String(d.reason || '').trim()
+                    reason: String(d.reason || '').trim(),
+                    // 只接受確實存在的既有標題，避免模型幻覺
+                    duplicateOf: typeof d.duplicateOf === 'string' && this._aiExistingTitles().includes(d.duplicateOf.trim()) ? d.duplicateOf.trim() : ''
                 };
             }
 
@@ -5170,6 +5370,7 @@
                                 ${d.description ? `<div>📝 ${esc(d.description)}</div>` : ''}
                                 ${d.tags.length ? `<div>🏷️ ${d.tags.map(esc).join('、')}</div>` : ''}
                                 ${rec ? `<div><label><input type="checkbox" class="ai-f-rec" checked> ${esc(recText)}</label></div>` : ''}
+                                ${d.duplicateOf ? `<div class="ai-dup">⚠️ 目前已有任務「${esc(d.duplicateOf)}」，請確認是否新增</div>` : ''}
                                 ${d.reason ? `<div>💡 ${esc(d.reason)}</div>` : ''}
                             </div>
                         </div>
@@ -5413,7 +5614,7 @@
 
                 // 分離非連續與有時間的任務（含壓縮任務）
                 const allCompleted = this.tasks.filter(t => {
-                    if (!t.completed || isStagedTask(t)) return false;
+                    if (!t.completed || isStagedTask(t) || isSubtask(t)) return false;
                     const d = t.completedDate || (t.completedAt ? t.completedAt.split('T')[0] : null);
                     return d && d >= startDateStr;
                 });
@@ -5673,6 +5874,17 @@
                 delete newTask.seriesId;   // 副本是新系列：否則與原任務共用 seriesId，兩邊「下一次」的固定 id 會互撞
 
                 this.tasks.push(newTask);
+                this.getSubtasks(originalTask.id).forEach(sub => {
+                    this.tasks.push({
+                        ...JSON.parse(JSON.stringify(sub)),
+                        id: genId(),
+                        parentId: newTask.id,
+                        completed: false,
+                        completedAt: null,
+                        completedDate: null,
+                        order: this.tasks.length
+                    });
+                });
                 this.saveToStorage();
                 this.updateUI();
             }
