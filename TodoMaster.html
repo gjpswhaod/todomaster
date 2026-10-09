@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.5 - 任務管理工具</title>
+    <title>TodoMaster v6.5.6 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -804,14 +804,12 @@
             background-color: var(--bg-primary);
         }
 
-        .radio-group,
         .checkbox-group {
             display: flex;
             flex-direction: column;
             gap: 8px;
         }
 
-        .radio-item,
         .checkbox-item {
             display: flex;
             align-items: center;
@@ -822,12 +820,10 @@
             transition: background-color 0.2s;
         }
 
-        .radio-item:hover,
         .checkbox-item:hover {
             background-color: var(--bg-tertiary);
         }
 
-        .radio-item input,
         .checkbox-item input {
             cursor: pointer;
             accent-color: var(--accent-primary);
@@ -1156,7 +1152,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.5';
+        const APP_VERSION = 'v6.5.6';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1187,6 +1183,12 @@
         const PERIOD_DEFAULT_TIME = { unspecified: null, morning: '08:00', afternoon: '13:00', evening: '19:00' };
         const PERIOD_LABELS = { unspecified: '🕒 未指定時間', morning: '🌄 早上', afternoon: '🌇 下午', evening: '🌙 晚上' };
 
+        const $ = id => document.getElementById(id);
+        // 任意值 → 可安全放進 innerHTML 的字串（null/undefined 視為空字串）
+        function escapeHtml(v) {
+            const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+            return String(v ?? '').replace(/[&<>"']/g, m => map[m]);
+        }
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
         }
@@ -1477,7 +1479,7 @@
 
                 <div class="form-group">
                     <label>標籤</label>
-                    <details class="multi-select" id="tagMulti">
+                    <details class="multi-select">
                         <summary id="tagSummary">未選擇</summary>
                         <div class="checkbox-group" id="tagCheckboxes"></div>
                     </details>
@@ -1855,6 +1857,7 @@
         // SYNC-CORE-BEGIN
         const SYNC_SCHEMA = 2;                 // state.json 資料版本（1 = v6.2 以前的備份檔：缺 updatedAt / deletedTasks）
         const SYNC_TOMBSTONE_DAYS = 30;        // 刪除標記保留天數（與「完成超過 30 天即清除」對齊）
+        const SYNC_TOMBSTONE_MS = SYNC_TOMBSTONE_DAYS * 86400000;
         const SYNC_DATA_PATH = 'state.json';
         const SYNC_SETUP_BASE = 'https://gjpswhaod.github.io/todomaster/TodoMaster.html';
         const SYNC_SAFE_NAME = /^[A-Za-z0-9._-]{1,100}$/;
@@ -1903,12 +1906,19 @@
             return !!ref && ref < cutoffStr;
         }
 
+        const compareById = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+        // 任務陣列 → { id: task }（衝突偵測的基準格式）
+        function tasksById(list) {
+            const out = {};
+            for (const t of list) out[t.id] = t;
+            return out;
+        }
+
         // 與順序無關的狀態摘要：用來判斷「合併結果是否與本機／遠端不同」
         function stateDigest(s) {
-            const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
             const del = s.deletedTasks || {};
             return stableStringify({
-                t: [...(s.tasks || [])].sort(byId),
+                t: [...(s.tasks || [])].sort(compareById),
                 g: [...(s.tags || [])].sort(),
                 l: (s.overdueLossLog || []).map(stableStringify).sort(),
                 d: Object.keys(del).sort().map(k => [k, del[k]])
@@ -2072,7 +2082,6 @@
          */
         function mergeStates(local, remote, opts = {}) {
             const now = opts.now ?? Date.now();
-            const ttl = SYNC_TOMBSTONE_DAYS * 86400000;
             const L = { tasks: local.tasks || [], tags: local.tags || [], log: local.overdueLossLog || [], del: local.deletedTasks || {} };
             const R = { tasks: remote.tasks || [], tags: remote.tags || [], log: remote.overdueLossLog || [], del: remote.deletedTasks || {} };
 
@@ -2081,7 +2090,7 @@
             for (const src of [R.del, L.del]) {
                 for (const id of Object.keys(src)) {
                     const at = src[id];
-                    if (!Number.isFinite(at) || now - at > ttl) continue;
+                    if (!Number.isFinite(at) || now - at > SYNC_TOMBSTONE_MS) continue;
                     if (!(id in deleted) || at > deleted[id]) deleted[id] = at;
                 }
             }
@@ -2469,7 +2478,7 @@
                     return;
                 }
                 this._lastStart = Date.now();
-                this._running = this._run(reason)
+                this._running = this._run()
                     .catch(e => this._handleError(e))
                     .finally(() => {
                         this._running = null;
@@ -2493,13 +2502,12 @@
             }
 
             _serialize(state) {
-                const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
                 return JSON.stringify({
                     schema: SYNC_SCHEMA,
                     app: APP_VERSION,
                     savedAt: new Date().toISOString(),
                     deviceId: this.app.deviceId,
-                    tasks: [...state.tasks].sort(byId),   // 依 id 排序：讓 git 歷史的 diff 穩定易讀
+                    tasks: [...state.tasks].sort(compareById),   // 依 id 排序：讓 git 歷史的 diff 穩定易讀
                     tags: state.tags,
                     overdueLossLog: state.overdueLossLog,
                     deletedTasks: state.deletedTasks
@@ -2518,7 +2526,7 @@
              * 一次同步：拉取 → 合併 → （有差異才）推送 → 套用回本機。
              * 推送遇到 409（遠端剛被別台更新）就重新拉取再合併，最多 5 輪。
              */
-            async _run(reason) {
+            async _run() {
                 const app = this.app;
                 const transport = new GitHubTransport(this.cfg);
                 this._setState('syncing');
@@ -2620,19 +2628,13 @@
             // 偵測用的基準：有快照就用；沒有快照但本機沒有待上傳變更 → 本機就是上次同步的內容；否則基準未知（升級後第一次且有待上傳變更）→ 本輪不偵測
             _baseForDetect(local) {
                 if (this.base && this.base.tasks) return this.base;
-                if (!this.meta.dirty) {
-                    const tasks = {};
-                    for (const t of local.tasks) tasks[t.id] = t;
-                    return { tasks };
-                }
+                if (!this.meta.dirty) return { tasks: tasksById(local.tasks) };
                 return null;
             }
 
             // 必須深拷貝（JSON 往返）：state.tasks 的物件之後會被使用者編輯就地修改，基準若共用參照就會跟著漂移
             _saveBase(state) {
-                const tasks = {};
-                for (const t of state.tasks) tasks[t.id] = t;
-                const json = JSON.stringify({ v: 1, tasks });
+                const json = JSON.stringify({ v: 1, tasks: tasksById(state.tasks) });
                 if (json === this._baseJson && this.base) return;
                 this.base = JSON.parse(json);
                 this._baseJson = json;
@@ -2758,7 +2760,6 @@
                 this.collapsedSections = new Set(Array.isArray(collapsed) ? collapsed : []);
                 this.currentEditingTask = null;
 
-
                 this.init();
             }
 
@@ -2860,9 +2861,8 @@
                         changed = true;
                     }
                 }
-                const ttl = SYNC_TOMBSTONE_DAYS * 86400000;
                 for (const id of Object.keys(this.deletedTasks)) {
-                    if (now - this.deletedTasks[id] > ttl) delete this.deletedTasks[id];
+                    if (now - this.deletedTasks[id] > SYNC_TOMBSTONE_MS) delete this.deletedTasks[id];
                 }
                 const metaFp = stableStringify([this.tags, this.overdueLossLog]);
                 if (metaFp !== this._metaFp) {
@@ -2916,13 +2916,7 @@
             // 套用遠端資料前，先留一份本機快照（只保留最近一份），必要時可在主控台用 app.restorePreSyncBackup() 還原
             _savePreSyncBackup(state) {
                 try {
-                    localStorage.setItem('todoPreSyncBackup', JSON.stringify({
-                        at: new Date().toISOString(),
-                        tasks: state.tasks,
-                        tags: state.tags,
-                        overdueLossLog: state.overdueLossLog,
-                        deletedTasks: state.deletedTasks
-                    }));
+                    localStorage.setItem('todoPreSyncBackup', JSON.stringify({ at: new Date().toISOString(), ...state }));
                 } catch (_) { /* 儲存空間不足時略過 */ }
             }
 
@@ -2936,9 +2930,7 @@
 
             // 「完成超過 30 天」的清除門檻日期（YYYY-MM-DD）
             _purgeCutoffStr() {
-                const cutoff = new Date();
-                cutoff.setDate(cutoff.getDate() - 30);
-                return localDateStr(cutoff);
+                return addDaysToDate(localDateStr(), -30);
             }
 
             // ===== 任務操作 =====
@@ -3036,7 +3028,7 @@
                 li.innerHTML = `
                     <div class="subtask-row">
                         <input type="checkbox" class="task-checkbox" ${sub.completed ? 'checked' : ''}>
-                        <span class="task-title" title="點擊改名">${this.escapeHtml(sub.title)}</span>
+                        <span class="task-title" title="點擊改名">${escapeHtml(sub.title)}</span>
                         <span class="subtask-time">${sub.completed && sub.actualTime != null ? `✓ ${sub.actualTime}分鐘` : `${meta?.emoji || ''} ${timeText}`}</span>
                         <button type="button" class="subtask-del" title="刪除子任務">✕</button>
                     </div>`;
@@ -3160,26 +3152,27 @@
 
             // ===== 標籤管理 =====
             addTag(name) {
-                if (!this.tags.find(t => t === name)) {
+                if (!this.tags.includes(name)) {
                     this.tags.push(name);
                     this.saveToStorage();
                 }
             }
 
             // ===== 過濾和排序 =====
+            // currentFilter 為 '<prefix>:<值>' 時回傳值（值本身可含冒號，例如標籤「a:b」），否則 null
+            _filterValue(prefix) {
+                return this.currentFilter.startsWith(prefix + ':') ? this.currentFilter.slice(prefix.length + 1) : null;
+            }
+
             getFilteredTasks() {
                 let filtered = this.tasks.filter(t => !isSubtask(t));
 
-                if (this.currentFilter.startsWith('category:')) {
-                    const category = this.currentFilter.split(':')[1];
-                    filtered = filtered.filter(t => t.category === category);
-                } else if (this.currentFilter.startsWith('tag:')) {
-                    const tag = this.currentFilter.split(':')[1];
-                    filtered = filtered.filter(t => t.tags && t.tags.includes(tag));
-                } else if (this.currentFilter.startsWith('group:')) {
-                    const groupId = this.currentFilter.split(':')[1];
-                    filtered = filtered.filter(t => t.groupId === groupId);
-                }
+                const category = this._filterValue('category');
+                const tag = this._filterValue('tag');
+                const groupId = this._filterValue('group');
+                if (category !== null) filtered = filtered.filter(t => t.category === category);
+                else if (tag !== null) filtered = filtered.filter(t => t.tags && t.tags.includes(tag));
+                else if (groupId !== null) filtered = filtered.filter(t => t.groupId === groupId);
 
                 // 暫存任務只在「所有任務」首頁的暫存區出現，不進任何分類/標籤/群組篩選
                 if (this.currentFilter !== 'all') {
@@ -3526,21 +3519,21 @@
                         <div class="task-header">
                             <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
                             ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
-                            <span class="task-title">${this.escapeHtml(task.title)}</span>
+                            <span class="task-title">${escapeHtml(task.title)}</span>
                             <div class="task-badges">
                                 <span class="task-category ${task.category}">
                                     ${CATEGORY_META[task.category]?.emoji} ${task.category}
                                 </span>
                                 ${task.tags && task.tags.length > 0 ? `
                                     <div class="task-tags">
-                                        ${task.tags.map(tag => `<span class="task-tag">${this.escapeHtml(tag)}</span>`).join('')}
+                                        ${task.tags.map(tag => `<span class="task-tag">${escapeHtml(tag)}</span>`).join('')}
                                     </div>
                                 ` : ''}
                             </div>
                             ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                         </div>
                         <div class="task-content">
-                            ${task.description ? `<div class="task-description">${this.escapeHtml(task.description)}</div>` : ''}
+                            ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
                             <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
@@ -3550,7 +3543,7 @@
                             </div>
                             ${task.nextStepNotes ? `
                                 <div style="margin-top: 8px; padding: 8px; background-color: var(--bg-tertiary); border-radius: 4px; border-left: 3px solid var(--accent-primary); font-size: 0.85rem; color: var(--text-secondary);">
-                                    <strong>💡 下一步：</strong> ${this.escapeHtml(task.nextStepNotes)}
+                                    <strong>💡 下一步：</strong> ${escapeHtml(task.nextStepNotes)}
                                 </div>
                             ` : ''}
                             ${task.blocks && task.blocks > 1 ? `
@@ -3733,20 +3726,14 @@
                     if (el) el.textContent = t.total > 0 ? `已預定${formatDuration(t.total)}，完成${formatDuration(t.completed)}，剩餘${formatDuration(t.total - t.completed)}` : '';
                 });
 
-                // 暫存區／逾期／更久以後：顯示項目數（收合時也看得到裡面有多少）
+                // 暫存區／逾期／更久以後：顯示項目數（收合時也看得到裡面有多少），無任務時隱藏區塊
                 ['staging', 'overdue', 'later'].forEach(sec => {
+                    if (!sections[sec]) return;
+                    const n = sections[sec].children.length;
                     const countEl = document.getElementById(`section-${sec}-count`);
-                    if (countEl && sections[sec]) {
-                        const n = sections[sec].children.length;
-                        countEl.textContent = n > 0 ? `（${n} 項）` : '';
-                    }
-                });
-
-                // 區塊無任務時隱藏
-                ['staging', 'overdue', 'later'].forEach(sec => {
+                    if (countEl) countEl.textContent = n > 0 ? `（${n} 項）` : '';
                     const section = document.getElementById(`section-${sec}`);
-                    const list = document.getElementById(`taskList-${sec}`);
-                    if (section && list) section.style.display = list.children.length === 0 ? 'none' : '';
+                    if (section) section.style.display = n === 0 ? 'none' : '';
                 });
                 // 今天/明天/後天：三段皆空才隱藏整個日期區塊，單一時段即使 0 筆也保留為拖放目標
                 ['today', 'tomorrow', 'dayafter'].forEach(sec => {
@@ -3845,8 +3832,8 @@
                 const taskItems = isSectionView
                     ? document.querySelectorAll('.section-task-list .task-item:not(.subtask)')
                     : document.querySelectorAll('#taskList .task-item:not(.subtask)');
-                const isGroupView = this.currentFilter.startsWith('group:');
-                const groupId = isGroupView ? this.currentFilter.split(':')[1] : null;
+                const groupId = this._filterValue('group');
+                const isGroupView = groupId !== null;
 
                 taskItems.forEach((item, index) => {
                     const taskId = item.dataset.taskId;
@@ -3913,7 +3900,6 @@
             }
 
             updateSortModeButton() {
-                const btn = document.getElementById('toggleSortBtn');
                 const text = document.getElementById('sortModeText');
                 if (!text) return;
                 text.textContent = this.sortMode === 'drag' ? '拖曳排序' : '固定排序';
@@ -3925,19 +3911,7 @@
                 text.textContent = this.showCompleted ? '顯示已完成' : '隱藏已完成';
             }
 
-
             // ===== 工具函數 =====
-            escapeHtml(text) {
-                const map = {
-                    '&': '&amp;',
-                    '<': '&lt;',
-                    '>': '&gt;',
-                    '"': '&quot;',
-                    "'": '&#039;'
-                };
-                return text.replace(/[&<>"']/g, m => map[m]);
-            }
-
             showNotification(message) {
                 const notification = document.createElement('div');
                 notification.className = 'notification';
@@ -3980,6 +3954,7 @@
                     document.getElementById('deleteTaskBtn').style.display = 'none';
                     document.getElementById('duplicateTaskBtn').style.display = 'none';
                     document.getElementById('actualTimeGroup').style.display = 'none';
+                    document.getElementById('nextStepNotesGroup').style.display = 'none';
                     document.getElementById('taskRecurring').checked = false;
                     document.getElementById('recurringOptions').style.display = 'none';
                     document.getElementById('taskGroup').checked = false;
@@ -4120,10 +4095,8 @@
                             this.sortMode = this.sortMode === 'drag' ? 'fixed' : 'drag';
                             this.saveToStorage();
                             // 切換到固定排序且在群組視圖時，根據目前排列重算日期
-                            if (this.sortMode === 'fixed' && this.currentFilter.startsWith('group:')) {
-                                const gid = this.currentFilter.split(':')[1];
-                                this.updateGroupTaskDates(gid);
-                            }
+                            const gid = this._filterValue('group');
+                            if (this.sortMode === 'fixed' && gid !== null) this.updateGroupTaskDates(gid);
                             this.updateUI();
                             return;
                         }
@@ -4216,6 +4189,11 @@
                                 const todayStr = localDateStr();
                                 const tomorrowStr = addDaysToDate(todayStr, 1);
                                 const dayAfterStr = addDaysToDate(todayStr, 2);
+                                const datedTargets = {
+                                    today: [todayStr, '📅 已移至今天'],
+                                    tomorrow: [tomorrowStr, '🌅 已移至明天'],
+                                    dayafter: [dayAfterStr, '🌤️ 已移至後天']
+                                };
                                 const task = this.getTaskById(taskId);
                                 const oldDate = task ? task.date : null;
                                 const oldTime = task ? task.time : null;
@@ -4226,22 +4204,11 @@
                                         this.showNotification('📥 已移入暫存區');
                                         sectionChanged = true;
                                     }
-                                } else if (sectionType === 'today') {
-                                    if (task && task.date !== todayStr) {
-                                        this.updateTask(taskId, { date: todayStr });
-                                        this.showNotification('📅 已移至今天');
-                                        sectionChanged = true;
-                                    }
-                                } else if (sectionType === 'tomorrow') {
-                                    if (task && task.date !== tomorrowStr) {
-                                        this.updateTask(taskId, { date: tomorrowStr });
-                                        this.showNotification('🌅 已移至明天');
-                                        sectionChanged = true;
-                                    }
-                                } else if (sectionType === 'dayafter') {
-                                    if (task && task.date !== dayAfterStr) {
-                                        this.updateTask(taskId, { date: dayAfterStr });
-                                        this.showNotification('🌤️ 已移至後天');
+                                } else if (datedTargets[sectionType]) {
+                                    const [date, msg] = datedTargets[sectionType];
+                                    if (task && task.date !== date) {
+                                        this.updateTask(taskId, { date });
+                                        this.showNotification(msg);
                                         sectionChanged = true;
                                     }
                                 } else if (sectionType === 'later') {
@@ -4253,8 +4220,8 @@
 
                                 // 有具體日期的三個區塊：依落點前一張卡推算並寫入時刻，並連動調整前後「原本連續」的任務
                                 if (task) {
-                                    const dated = ['today', 'tomorrow', 'dayafter'].includes(sectionType);
-                                    const newTime = dated ? this.computeDropTime(draggingEl) : (sectionType === 'staging' ? null : task.time || null);
+                                    const dated = !!datedTargets[sectionType];
+                                    const newTime = dated ? this.computeDropTime(draggingEl) : null;
                                     if (dated && newTime !== (task.time || null)) {
                                         this.updateTask(taskId, { time: newTime });
                                         sectionChanged = true;
@@ -4271,8 +4238,6 @@
                 });
 
                 // 雲端同步／備份檔的事件監聽已在 setupSyncListeners() 中設定
-
-
 
                 // 菜單 / 側欄收合切換
                 const menuToggleBtn = document.getElementById('menuToggleBtn');
@@ -4445,12 +4410,10 @@
                     groupSelect.appendChild(option);
                 });
 
-                const setCycleModeRadio = (mode) => {
-                    document.getElementById('groupCycleMode').value = mode;
-                };
-
-                const setDelayModeRadio = (mode) => {
-                    document.getElementById('groupDelayMode').value = mode;
+                // 週期／順延模式下拉：沿用群組第一個任務的設定，無則預設值
+                const setGroupModes = (first) => {
+                    document.getElementById('groupCycleMode').value = first?.groupCycleMode || 'uniform';
+                    document.getElementById('groupDelayMode').value = first?.groupDelayMode || 'fixed';
                 };
 
                 // 監聽選擇變化
@@ -4464,12 +4427,10 @@
                             .sort((a, b) => (a.groupOrder || 1) - (b.groupOrder || 1));
                         const nextOrder = groupTasks.length + 1;
                         groupOrderDisplay.textContent = `此群組已有 ${groupTasks.length} 個任務，新任務順序：${nextOrder}`;
-                        setCycleModeRadio(groupTasks[0]?.groupCycleMode || 'uniform');
-                        setDelayModeRadio(groupTasks[0]?.groupDelayMode || 'fixed');
+                        setGroupModes(groupTasks[0]);
                     } else {
                         groupOrderDisplay.textContent = '';
-                        setCycleModeRadio('uniform');
-                        setDelayModeRadio('fixed');
+                        setGroupModes(null);
                     }
                 };
 
@@ -4478,16 +4439,13 @@
                     const groupTasks = this.tasks.filter(t => t.groupId === currentGroupId);
                     const currentTaskOrder = groupTasks.find(t => t.id === this.currentEditingTask.id)?.groupOrder || 1;
                     groupOrderDisplay.textContent = `此群組有 ${groupTasks.length} 個任務，當前順序：${currentTaskOrder}`;
-                    setCycleModeRadio(groupTasks[0]?.groupCycleMode || 'uniform');
-                    setDelayModeRadio(groupTasks[0]?.groupDelayMode || 'fixed');
+                    setGroupModes(groupTasks[0]);
                 } else {
                     newGroupNameGroup.style.display = 'block';
                     groupOrderDisplay.textContent = '';
-                    setCycleModeRadio('uniform');
-                    setDelayModeRadio('fixed');
+                    setGroupModes(null);
                 }
             }
-
 
             openCompleteTimeModal(taskId, checkbox, originalState) {
                 const task = this.getTaskById(taskId);
@@ -4507,7 +4465,6 @@
                 document.getElementById('nextStepNotes').value = task.nextStepNotes || '';
                 document.getElementById('completeTimeInput').focus();
 
-
                 // 設置按鈕事件
                 document.getElementById('useEstimateBtn').onclick = () => {
                     this.pendingCompleteTask = null;
@@ -4517,19 +4474,13 @@
 
                 document.getElementById('confirmCompleteBtn').onclick = () => {
                     const actualTime = document.getElementById('completeTimeInput').value.trim();
-                    if (!actualTime) {
-                        // 未填寫時使用預計時間
-                        this.pendingCompleteTask = null;
-                        this.completeTaskWithTime(taskId, estimateTime);
-                    } else {
-                        const time = parseInt(actualTime);
-                        if (isNaN(time) || time < 0) {
-                            alert('請輸入有效的時間（正整數）');
-                            return;
-                        }
-                        this.pendingCompleteTask = null;
-                        this.completeTaskWithTime(taskId, time);
+                    const time = actualTime ? parseInt(actualTime) : estimateTime;   // 未填寫時使用預計時間
+                    if (isNaN(time) || time < 0) {
+                        alert('請輸入有效的時間（正整數）');
+                        return;
                     }
+                    this.pendingCompleteTask = null;
+                    this.completeTaskWithTime(taskId, time);
                     closeModal('completeTimeModal');
                 };
 
@@ -4577,10 +4528,9 @@
                 const task = this.getTaskById(taskId);
                 if (!task) return;
                 const totalBlocks = task.blocks;
-                const BLOCK_ESTIMATE = BLOCK_MINUTES;
 
                 document.getElementById('blockTimeModalTitle').textContent = `Block ${newCompleted}/${totalBlocks} 完成！`;
-                document.getElementById('blockTimeModalHint').textContent = `本段預計：${BLOCK_ESTIMATE} 分鐘`;
+                document.getElementById('blockTimeModalHint').textContent = `本段預計：${BLOCK_MINUTES} 分鐘`;
                 document.getElementById('blockTimeInput').value = '';
 
                 const confirmBlock = (minutes) => {
@@ -4590,7 +4540,7 @@
                     const updates = { completedBlocks: newCompleted, blockTimes, actualTime: runningActual };
 
                     if (newCompleted === totalBlocks) {
-                        const totalPlanned = totalBlocks * BLOCK_ESTIMATE;
+                        const totalPlanned = totalBlocks * BLOCK_MINUTES;
                         updates.completed = true;
                         updates.timeBalance = this.calcTimeBalance(task, runningActual);
                         // 處理 nextStepNotes（若 completeTimeModal 的欄位存在）
@@ -4604,17 +4554,17 @@
                     } else {
                         this.updateTask(taskId, updates);
                         closeModal('blockTimeModal');
-                        const diff = minutes - BLOCK_ESTIMATE;
+                        const diff = minutes - BLOCK_MINUTES;
                         const diffSymbol = diff < -10 ? ` ⏩ 節省 ${Math.abs(diff)}分` : diff > 10 ? ` ⚠️ 超時 ${diff}分` : ` ${getTimingSymbol(diff)}`;
                         this.showNotification(`Block ${newCompleted}/${totalBlocks} 完成，用時 ${minutes}分${diffSymbol}`);
                     }
                     this.updateUI();
                 };
 
-                document.getElementById('blockTimeUseEstimateBtn').onclick = () => confirmBlock(BLOCK_ESTIMATE);
+                document.getElementById('blockTimeUseEstimateBtn').onclick = () => confirmBlock(BLOCK_MINUTES);
                 document.getElementById('blockTimeConfirmBtn').onclick = () => {
                     const val = parseInt(document.getElementById('blockTimeInput').value);
-                    confirmBlock(isNaN(val) || val < 0 ? BLOCK_ESTIMATE : val);
+                    confirmBlock(isNaN(val) || val < 0 ? BLOCK_MINUTES : val);
                 };
                 bindEnterToClick('blockTimeInput', 'blockTimeConfirmBtn');
 
@@ -4825,12 +4775,7 @@
                     const plannedTime = getTaskPlannedMinutes(task);
 
                     // 時間收支（優先用任務完成時已計算的值）
-                    let timeBalance = null;
-                    if (task.timeBalance !== undefined && task.timeBalance !== null) {
-                        timeBalance = task.timeBalance;
-                    } else {
-                        timeBalance = this.calcTimeBalance(task, task.actualTime ?? plannedTime);
-                    }
+                    const timeBalance = task.timeBalance ?? this.calcTimeBalance(task, task.actualTime ?? plannedTime);
 
                     return {
                         id:            task.id,
@@ -4886,47 +4831,19 @@
             }
 
             setupQuickDateButtons() {
-                const today = new Date();
-
-                // 今天 / 明天 / 後天
-                const relativeDays = [
-                    { id: 'todayBtn', offset: 0 },
-                    { id: 'tomorrowBtn', offset: 1 },
-                    { id: 'dayAfterBtn', offset: 2 }
-                ];
-                relativeDays.forEach(({ id, offset }) => {
-                    document.getElementById(id).onclick = () => {
-                        const date = new Date(today);
-                        date.setDate(date.getDate() + offset);
-                        document.getElementById('taskDate').value = localDateStr(date);
-                    };
+                const setDate = offset => { $('taskDate').value = addDaysToDate(localDateStr(), offset); };
+                // 今天 / 明天 / 後天（點擊時才取「今天」，App 開著跨過午夜也不會錯一天）
+                [['todayBtn', 0], ['tomorrowBtn', 1], ['dayAfterBtn', 2]].forEach(([id, offset]) => {
+                    $(id).onclick = () => setDate(offset);
                 });
-
-                // 下週各日
-                const weekDays = [
-                    { id: 'nextMonBtn', dayOffset: 1 },
-                    { id: 'nextTueBtn', dayOffset: 2 },
-                    { id: 'nextWedBtn', dayOffset: 3 },
-                    { id: 'nextThuBtn', dayOffset: 4 },
-                    { id: 'nextFriBtn', dayOffset: 5 },
-                    { id: 'nextSatBtn', dayOffset: 6 },
-                    { id: 'nextSunBtn', dayOffset: 7 }
-                ];
-
-                weekDays.forEach(day => {
-                    const btn = document.getElementById(day.id);
-                    if (btn) {
-                        btn.onclick = () => {
-                            const targetDate = new Date(today);
-                            const currentDay = today.getDay();
-                            let daysToAdd = day.dayOffset - currentDay;
-                            if (daysToAdd <= 0) {
-                                daysToAdd += 7; // 下週
-                            }
-                            targetDate.setDate(targetDate.getDate() + daysToAdd);
-                            document.getElementById('taskDate').value = localDateStr(targetDate);
-                        };
-                    }
+                // 下週一～日：往後最近的那一天（今天是週三按「週三」→ 7 天後）
+                ['nextMonBtn', 'nextTueBtn', 'nextWedBtn', 'nextThuBtn', 'nextFriBtn', 'nextSatBtn', 'nextSunBtn'].forEach((id, i) => {
+                    const btn = $(id);
+                    if (!btn) return;
+                    btn.onclick = () => {
+                        const daysToAdd = (i + 1) - new Date().getDay();
+                        setDate(daysToAdd <= 0 ? daysToAdd + 7 : daysToAdd);
+                    };
                 });
             }
 
@@ -4955,15 +4872,11 @@
                     }
                 }
                 // 選完資料夾才取資料：選取視窗開著的期間若有同步進來的變更，備份也會包含
-                const s = this._exportState();
                 const text = JSON.stringify({
                     schema: SYNC_SCHEMA,
                     version: APP_VERSION,
                     syncDate: new Date().toISOString(),
-                    tasks: s.tasks,
-                    tags: s.tags,
-                    overdueLossLog: s.overdueLossLog,
-                    deletedTasks: s.deletedTasks
+                    ...this._exportState()
                 }, null, 2);
                 const fileName = `todomaster-backup-${localDateTimeStr()}.json`;
                 if (!dir) {
@@ -5030,7 +4943,6 @@
             }
 
             _renderBackupList(folderName, files) {
-                const esc = s => this.escapeHtml(String(s));
                 const when = ms => {
                     const d = new Date(ms);
                     return `${localDateStr(d)} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
@@ -5041,7 +4953,7 @@
                     : `資料夾「${folderName}」裡沒有 .json 備份檔，請重新選擇資料夾。`;
                 document.getElementById('backupList').innerHTML = files.map((f, i) =>
                     `<label class="conf-opt"><input type="radio" name="backupFile" value="${i}"${i === 0 ? ' checked' : ''}>` +
-                    `<div><b>${esc(f.name)}</b><br><span class="backup-file-meta">${when(f.lastModified)} · ${Math.max(1, Math.round(f.size / 1024))} KB</span></div></label>`).join('');
+                    `<div><b>${escapeHtml(f.name)}</b><br><span class="backup-file-meta">${when(f.lastModified)} · ${Math.max(1, Math.round(f.size / 1024))} KB</span></div></label>`).join('');
                 document.getElementById('backupLoadBtn').disabled = files.length === 0;
                 document.getElementById('backupListBox').style.display = '';
             }
@@ -5100,7 +5012,6 @@
             // conflicts：detectConflicts() 的結果；opts：{ title, labels:{local,remote}, onApply(mode), onLater() }。
             // 只列出衝突的任務與逐欄位差異；處理方式是全域選一種，套用到所有衝突任務。
             openConflictModal(conflicts, opts) {
-                const esc = s => this.escapeHtml(String(s));
                 const L = opts.labels.local, R = opts.labels.remote;
                 const FIELD_LABELS = {
                     title: '名稱', description: '備註', date: '日期', time: '時刻', category: '分類', taskType: '任務類型',
@@ -5134,13 +5045,13 @@
                     const val = (c, side, k) => (c.kind === 'remote-deleted' && side === 'remote') || (c.kind === 'local-deleted' && side === 'local')
                         ? '（已刪除）' : fmt(k, c[side] && c[side][k]);
                     const fields = c.fields.slice(0, MAX_FIELDS).map(k =>
-                        `<div class="conf-field"><span class="conf-label">${esc(FIELD_LABELS[k] || k)}</span>` +
-                        `<span class="conf-side"><b>${esc(L)}</b>${esc(val(c, 'local', k))}</span>` +
-                        `<span class="conf-side remote"><b>${esc(R)}</b>${esc(val(c, 'remote', k))}</span></div>`
+                        `<div class="conf-field"><span class="conf-label">${escapeHtml(FIELD_LABELS[k] || k)}</span>` +
+                        `<span class="conf-side"><b>${escapeHtml(L)}</b>${escapeHtml(val(c, 'local', k))}</span>` +
+                        `<span class="conf-side remote"><b>${escapeHtml(R)}</b>${escapeHtml(val(c, 'remote', k))}</span></div>`
                     ).join('');
                     const more = c.fields.length > MAX_FIELDS ? `<div class="conf-kind">…另有 ${c.fields.length - MAX_FIELDS} 個欄位不同</div>` : '';
-                    return `<div class="dup-group"><div class="dup-title">📝 ${esc(c.title || '（無標題）')}</div>` +
-                        `<div class="conf-kind">${esc(KIND_TEXT[c.kind] || '')}</div>${fields}${more}</div>`;
+                    return `<div class="dup-group"><div class="dup-title">📝 ${escapeHtml(c.title || '（無標題）')}</div>` +
+                        `<div class="conf-kind">${escapeHtml(KIND_TEXT[c.kind] || '')}</div>${fields}${more}</div>`;
                 }).join('');
                 const hidden = conflicts.length > MAX_TASKS ? `<div class="sync-help">…另有 ${conflicts.length - MAX_TASKS} 個衝突任務未列出，處理方式會一併套用。</div>` : '';
                 document.getElementById('conflictTitle').textContent = '⚠️ ' + opts.title;
@@ -5155,7 +5066,7 @@
                 ];
                 document.getElementById('conflictOptions').innerHTML = OPTIONS.map(([v, label, desc], i) =>
                     `<label class="conf-opt"><input type="radio" name="conflictMode" value="${v}"${i === 0 ? ' checked' : ''}>` +
-                    `<div><b>${esc(label)}</b><br><span class="dup-note">${esc(desc)}</span></div></label>`).join('');
+                    `<div><b>${escapeHtml(label)}</b><br><span class="dup-note">${escapeHtml(desc)}</span></div></label>`).join('');
                 const modal = document.getElementById('conflictModal');
                 let done = false;
                 const finish = fn => {
@@ -5199,7 +5110,6 @@
 
             openSyncModal() {
                 const c = this.cloud;
-                const $ = id => document.getElementById(id);
                 $('syncOwner').value = (c.cfg && c.cfg.owner) || '';
                 $('syncRepo').value = (c.cfg && c.cfg.repo) || '';
                 $('syncToken').value = '';
@@ -5221,7 +5131,6 @@
             }
 
             _aiShowKeySetup(show) {
-                const $ = id => document.getElementById(id);
                 $('aiKeySetup').style.display = show ? '' : 'none';
                 $('aiMain').style.display = show ? 'none' : '';
                 $('aiKeyCancelBtn').style.display = (show && this._aiKey()) ? '' : 'none';
@@ -5440,9 +5349,8 @@
             }
 
             renderAiPreview(drafts) {
-                const esc = s => this.escapeHtml(String(s));
                 const opts = (map, sel, label) => Object.keys(map)
-                    .map(k => `<option value="${k}"${k === sel ? ' selected' : ''}>${esc(label(map[k]))}</option>`).join('');
+                    .map(k => `<option value="${k}"${k === sel ? ' selected' : ''}>${escapeHtml(label(map[k]))}</option>`).join('');
                 const dateModes = { scheduled: '📅 具體日期', unscheduled: '📥 暫存區', unlimited: '♾️ 不限期' };
                 const box = document.getElementById('aiPreview');
                 box.innerHTML = drafts.map((d, i) => {
@@ -5452,11 +5360,11 @@
                     <div class="ai-card" data-i="${i}">
                         <input type="checkbox" class="ai-f-on" checked aria-label="加入這項">
                         <div class="ai-card-body">
-                            <input type="text" class="ai-f-title" value="${esc(d.title)}" aria-label="任務名稱">
+                            <input type="text" class="ai-f-title" value="${escapeHtml(d.title)}" aria-label="任務名稱">
                             <div class="ai-card-row">
                                 <select class="ai-f-dateMode" aria-label="日期模式">${opts(dateModes, d.dateMode, v => v)}</select>
-                                <input type="date" class="ai-f-date" value="${esc(d.date)}" aria-label="日期">
-                                <input type="time" class="ai-f-time" value="${esc(d.time)}" aria-label="時刻">
+                                <input type="date" class="ai-f-date" value="${escapeHtml(d.date)}" aria-label="日期">
+                                <input type="time" class="ai-f-time" value="${escapeHtml(d.time)}" aria-label="時刻">
                             </div>
                             <div class="ai-card-row">
                                 <select class="ai-f-category" aria-label="分類">${opts(CATEGORY_META, d.category, m => `${m.emoji} ${m.label}`)}</select>
@@ -5465,11 +5373,11 @@
                                 <select class="ai-f-taskType" aria-label="任務類型">${opts(TASK_TYPE_META, d.taskType, v => v)}</select>
                             </div>
                             <div class="ai-card-meta">
-                                ${d.description ? `<div>📝 ${esc(d.description)}</div>` : ''}
-                                ${d.tags.length ? `<div>🏷️ ${d.tags.map(esc).join('、')}</div>` : ''}
-                                ${rec ? `<div><label><input type="checkbox" class="ai-f-rec" checked> ${esc(recText)}</label></div>` : ''}
-                                ${d.duplicateOf ? `<div class="ai-dup">⚠️ 目前已有任務「${esc(d.duplicateOf)}」，請確認是否新增</div>` : ''}
-                                ${d.reason ? `<div>💡 ${esc(d.reason)}</div>` : ''}
+                                ${d.description ? `<div>📝 ${escapeHtml(d.description)}</div>` : ''}
+                                ${d.tags.length ? `<div>🏷️ ${d.tags.map(escapeHtml).join('、')}</div>` : ''}
+                                ${rec ? `<div><label><input type="checkbox" class="ai-f-rec" checked> ${escapeHtml(recText)}</label></div>` : ''}
+                                ${d.duplicateOf ? `<div class="ai-dup">⚠️ 目前已有任務「${escapeHtml(d.duplicateOf)}」，請確認是否新增</div>` : ''}
+                                ${d.reason ? `<div>💡 ${escapeHtml(d.reason)}</div>` : ''}
                             </div>
                         </div>
                     </div>`;
@@ -5553,7 +5461,6 @@
             }
 
             setupAiListeners() {
-                const $ = id => document.getElementById(id);
                 this.aiDrafts = [];
                 $('aiAddBtn').addEventListener('click', () => this.openAiModal());
                 $('aiParseBtn').addEventListener('click', () => this.runAiParse());
@@ -5593,7 +5500,6 @@
             }
 
             setupSyncListeners() {
-                const $ = id => document.getElementById(id);
                 const cloud = this.cloud;
 
                 $('cloudSyncNowBtn').addEventListener('click', async () => {
@@ -5692,23 +5598,7 @@
 
             // 蒐集指定期間的統計資料（暫存任務排除；壓縮任務已預存 plannedTime/actualTime，與一般任務同路徑）
             _collectStatsData(period) {
-                const now = new Date();
-                let startDate;
-
-                if (period === 'today') {
-                    startDate = new Date(now);
-                    startDate.setHours(0, 0, 0, 0);
-                } else if (period === 'week') {
-                    startDate = new Date(now);
-                    startDate.setDate(startDate.getDate() - 6);
-                    startDate.setHours(0, 0, 0, 0);
-                } else if (period === 'month') {
-                    startDate = new Date(now);
-                    startDate.setDate(startDate.getDate() - 29);
-                    startDate.setHours(0, 0, 0, 0);
-                }
-
-                const startDateStr = localDateStr(startDate);
+                const startDateStr = addDaysToDate(localDateStr(), -{ today: 0, week: 6, month: 29 }[period]);
 
                 // 分離非連續與有時間的任務（含壓縮任務）
                 const allCompleted = this.tasks.filter(t => {
@@ -5731,19 +5621,11 @@
                     stats.tasks.push({ ...task, plannedTime: planned, actualTime: actual, timeBalance: tb });
                 });
 
-                // 時間收支總計（含壓縮任務 timeBalance）
-                let totalTimeBalance = 0;
-                stats.tasks.forEach(t => {
-                    const tb = t.timeBalance ?? null;
-                    if (tb !== null) totalTimeBalance += tb;
-                });
-
-                // 逾期任務「重新安排到今天」的損失，記入原定日期落在統計區間內者
-                this.overdueLossLog.forEach(rec => {
-                    if (rec.date >= startDateStr) totalTimeBalance -= rec.minutes;
-                });
-
-                const hasOverdueLossInRange = this.overdueLossLog.some(rec => rec.date >= startDateStr);
+                // 時間收支總計（含壓縮任務 timeBalance），扣除原定日期落在區間內的逾期「重新安排到今天」損失
+                const lossInRange = this.overdueLossLog.filter(rec => rec.date >= startDateStr);
+                const totalTimeBalance = stats.tasks.reduce((sum, t) => sum + (t.timeBalance ?? 0), 0)
+                    - lossInRange.reduce((sum, rec) => sum + rec.minutes, 0);
+                const hasOverdueLossInRange = lossInRange.length > 0;
 
                 return { startDateStr, stats, nonContinuousTasks, totalTimeBalance, hasOverdueLossInRange };
             }
@@ -5780,20 +5662,14 @@
                 stats.tasks.forEach(task => {
                     const tb = task.timeBalance ?? null;
                     const diffStyle = (tb !== null && tb < 0) ? 'color: #ff6b6b;' : 'color: #51cf66;';
-                    const typeMap = { accumulative: '📈', goal: '🎯', ahead: '⏭️' };
-                    const typeLabel = task.taskType ? (typeMap[task.taskType] || '') : '';
-                    const ledgerLabel = (() => {
-                        if (tb === null || tb === undefined) return '';
-                        if (tb > 0) return `賺得 ${tb} 分`;
-                        if (tb < 0) return `延遲 ${Math.abs(tb)} 分`;
-                        return '';
-                    })();
+                    const typeLabel = TASK_TYPE_META[task.taskType]?.split(' ')[0] || '';
+                    const ledgerLabel = tb > 0 ? `賺得 ${tb} 分` : tb < 0 ? `延遲 ${Math.abs(tb)} 分` : '';
                     const plannedDisplay = task.plannedTime != null ? task.plannedTime + '分' : '—';
                     const actualDisplay  = task.actualTime  != null ? task.actualTime  + '分' : '—';
                     const diffDisplay    = tb !== null ? `${tb > 0 ? '+' : ''}${tb}分` : '—';
                     tableHtml += `
                         <tr style="border-bottom: 1px solid var(--bg-tertiary);">
-                            <td style="padding: 8px;">${typeLabel ? `<span>${typeLabel} </span>` : ''}${this.escapeHtml(task.title)}${ledgerLabel ? `<br><span style="font-size:0.75rem;color:var(--text-secondary);">${ledgerLabel}</span>` : ''}</td>
+                            <td style="padding: 8px;">${typeLabel ? `<span>${typeLabel} </span>` : ''}${escapeHtml(task.title)}${ledgerLabel ? `<br><span style="font-size:0.75rem;color:var(--text-secondary);">${ledgerLabel}</span>` : ''}</td>
                             <td style="text-align: right; padding: 8px;">${plannedDisplay}</td>
                             <td style="text-align: right; padding: 8px;">${actualDisplay}</td>
                             <td style="text-align: right; padding: 8px; ${diffStyle}">${diffDisplay}</td>
@@ -5847,22 +5723,21 @@
                 const trendEl = document.getElementById('dailyTrendChart');
                 if (period === 'week' || period === 'month') {
                     const dayStats = {};
+                    const dayOf = key => (dayStats[key] ??= { actual: 0, planned: 0, balance: 0, hasAhead: false });
                     stats.tasks.forEach(t => {
                         const day = t.completedDate || (t.completedAt ? t.completedAt.split('T')[0] : null);
                         if (!day) return;
-                        if (!dayStats[day]) dayStats[day] = { actual: 0, planned: 0, balance: 0, hasAhead: false };
-                        dayStats[day].actual   += (t.actualTime  || 0);
-                        dayStats[day].planned  += (t.plannedTime || 0);
-                        dayStats[day].balance  += (t.timeBalance ?? 0);
-                        dayStats[day].hasAhead  = dayStats[day].hasAhead || this.isAheadCompletion(t);
+                        const ds = dayOf(day);
+                        ds.actual   += (t.actualTime  || 0);
+                        ds.planned  += (t.plannedTime || 0);
+                        ds.balance  += (t.timeBalance ?? 0);
+                        ds.hasAhead  = ds.hasAhead || this.isAheadCompletion(t);
                     });
 
                     // 逾期任務「重新安排到今天」的損失，記到原定日期那一天（僅視為當天的負值時間收支）；
                     // 不增加當天預定時間——任務改期後會在新日期再計一次預定時間，這裡再加會重複計算
                     this.overdueLossLog.forEach(rec => {
-                        if (rec.date < startDateStr) return;
-                        if (!dayStats[rec.date]) dayStats[rec.date] = { actual: 0, planned: 0, balance: 0, hasAhead: false };
-                        dayStats[rec.date].balance -= rec.minutes;
+                        if (rec.date >= startDateStr) dayOf(rec.date).balance -= rec.minutes;
                     });
 
                     const days = period === 'week' ? 7 : 30;
@@ -6016,10 +5891,10 @@
                 const taskData = {
                     title,
                     description: document.getElementById('taskDescription').value.trim(),
-                    date: date,
-                    time: time,
-                    estimatedTime: estimatedTime,
-                    blocks: blocks,
+                    date,
+                    time,
+                    estimatedTime,
+                    blocks,
                     completedBlocks: 0,
                     blockTimes: [],
                     category: document.getElementById('category').value,
@@ -6099,9 +5974,9 @@
                     }
 
                     // 保留或更新「下一步建議」
-                    const editNextStepNotes = document.getElementById('editNextStepNotes');
-                    if (editNextStepNotes && editNextStepNotes.style.display !== 'none') {
-                        taskData.nextStepNotes = editNextStepNotes.value.trim() || null;
+                    // 以外層群組是否顯示判斷（textarea 本身永遠不隱藏；隱藏時其值可能是上一個編輯任務留下的）
+                    if (document.getElementById('nextStepNotesGroup').style.display !== 'none') {
+                        taskData.nextStepNotes = document.getElementById('editNextStepNotes').value.trim() || null;
                     } else {
                         taskData.nextStepNotes = this.currentEditingTask.nextStepNotes || null;
                     }
@@ -6192,8 +6067,6 @@
                     anchorIndex = 0;
                 }
 
-                const anchorDate = new Date(anchorDateStr);
-
                 if (cycleMode === 'individual') {
                     // 個別設定：先算出每個任務相對錨點的累積天數位移，再以錨點日期對齊套用
                     const offsets = new Array(activeTasks.length).fill(0);
@@ -6203,19 +6076,11 @@
                     for (let i = anchorIndex - 1; i >= 0; i--) {
                         offsets[i] = offsets[i + 1] - (activeTasks[i].recurring.interval || 1);
                     }
-                    activeTasks.forEach((task, i) => {
-                        const newDate = new Date(anchorDate);
-                        newDate.setDate(newDate.getDate() + offsets[i]);
-                        task.date = localDateStr(newDate);
-                    });
+                    activeTasks.forEach((task, i) => { task.date = addDaysToDate(anchorDateStr, offsets[i]); });
                 } else {
                     // 統一：所有任務共用同一間隔天數
                     const interval = activeTasks[0].recurring.interval;
-                    activeTasks.forEach((task, index) => {
-                        const newDate = new Date(anchorDate);
-                        newDate.setDate(newDate.getDate() + (index - anchorIndex) * interval);
-                        task.date = localDateStr(newDate);
-                    });
+                    activeTasks.forEach((task, i) => { task.date = addDaysToDate(anchorDateStr, (i - anchorIndex) * interval); });
                 }
 
                 // 日期重排後，含「重複次數」的任務同步校正各自的預定結束日期
@@ -6244,7 +6109,7 @@
                     if (this.currentFilter === `group:${group.groupId}`) {
                         btn.classList.add('active');
                     }
-                    btn.innerHTML = `<span class="filter-icon">🔁</span>${this.escapeHtml(group.name)}`;
+                    btn.innerHTML = `<span class="filter-icon">🔁</span>${escapeHtml(group.name)}`;
                     btn.dataset.filter = `group:${group.groupId}`;
                     btn.onclick = () => this.selectFilterButton(btn, `group:${group.groupId}`);
                     filterList.appendChild(btn);
