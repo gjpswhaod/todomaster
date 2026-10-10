@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.6 - 任務管理工具</title>
+    <title>TodoMaster v6.5.7 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -508,6 +508,9 @@
             border-left: 3px solid var(--accent-primary);
         }
         .ai-dup { color: #f59f00; font-weight: 600; }
+        .ai-diff { margin: 2px 0 0 0; padding-left: 18px; }
+        .ai-diff li { white-space: pre-wrap; }
+        .ai-card.upd .ai-card-row, .ai-card:not(.upd) .ai-diff { display: none; }
         .subtask-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
         .subtask-row .task-title { flex: 1; font-size: 0.9rem; }
         .subtask-time { color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; }
@@ -1152,7 +1155,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.6';
+        const APP_VERSION = 'v6.5.7';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -5124,8 +5127,9 @@
                 this.openModal('syncModal');
             }
 
-            // ===== ✨ AI 新增任務（v6.5.1 Gemini 版）=====
-            // 只會「新增」：不讀取、不修改、不刪除既有任務（送給 AI 的只有今天日期與既有標籤名稱）
+            // ===== ✨ AI 新增／編輯任務（v6.5.1 Gemini 版；v6.5.7 起可編輯既有任務）=====
+            // 送給 AI 的只有今天日期、既有標籤名稱與未完成任務標題；AI 用 duplicateOf 指出對應的既有任務，
+            // 欄位比對與合併（_aiDiff）在本機進行，經使用者勾選確認後才修改，不會刪除任務
             _aiKey() {
                 try { return localStorage.getItem(AI_KEY_STORAGE) || ''; } catch (_) { return ''; }
             }
@@ -5164,6 +5168,52 @@
                 return [...seen];
             }
 
+            // 依標題找出對應的既有任務（篩選同 _aiExistingTitles）；同名多筆時取日期最近的
+            _aiFindExisting(title) {
+                const today = localDateStr();
+                const rank = t => !t.date ? 99999 : Math.abs((new Date(t.date) - new Date(today)) / 86400000);
+                return this.tasks
+                    .filter(t => !t.completed && !t.compressed && !isSubtask(t) && String(t.title || '').trim().slice(0, 60) === title)
+                    .sort((a, b) => rank(a) - rank(b))[0] || null;
+            }
+
+            // 比對 AI 草稿與既有任務：衝突以新描述為準、可補充則合併、相符則不動。
+            // 只處理使用者口語中明確提到的欄位（日期、時刻、附註、標籤）；分類、預計時間等 AI 推測值不覆蓋既有設定
+            _aiDiff(d, t) {
+                const updates = {};
+                const changes = [];
+                const dateLabel = v => !v ? '📥 暫存區' : v === '9999-12-31' ? '♾️ 不限期' : v;
+                const oldDate = t.date || '';
+                let newDate = oldDate;
+                if (d.dateMode === 'scheduled' && d.date !== oldDate) newDate = d.date;
+                else if (d.dateMode === 'unlimited' && !oldDate) newDate = '9999-12-31';
+                if (newDate !== oldDate) {
+                    updates.date = newDate;
+                    changes.push(`📅 日期：${dateLabel(oldDate)} → ${dateLabel(newDate)}`);
+                }
+                const scheduled = newDate && newDate !== '9999-12-31';
+                const oldTime = t.time || '';
+                const newTime = !scheduled ? '' : (d.dateMode === 'scheduled' && d.time) ? d.time : oldTime;
+                if (newTime !== oldTime) {
+                    updates.time = newTime || null;
+                    changes.push(`🕐 時刻：${oldTime || '未指定'} → ${newTime || '未指定'}`);
+                }
+                const oldDesc = String(t.description || '').trim();
+                const newDesc = d.description;
+                if (newDesc && !oldDesc.includes(newDesc)) {
+                    const merged = (!oldDesc || newDesc.includes(oldDesc)) ? newDesc : `${oldDesc}\n${newDesc}`;
+                    updates.description = merged;
+                    changes.push(`📝 附註：${oldDesc || '（無）'} → ${merged}`);
+                }
+                const oldTags = Array.isArray(t.tags) ? t.tags : [];
+                const addTags = d.tags.filter(x => !oldTags.includes(x));
+                if (addTags.length) {
+                    updates.tags = [...oldTags, ...addTags];
+                    changes.push(`🏷️ 加上標籤：${addTags.join('、')}`);
+                }
+                return { updates, changes };
+            }
+
             _aiSystemPrompt() {
                 const wd = ['日', '一', '二', '三', '四', '五', '六'];
                 const today = new Date();
@@ -5175,7 +5225,7 @@
                 const tags = this.tags.length ? this.tags.join('、') : '（目前沒有標籤）';
                 const existing = this._aiExistingTitles();
                 return [
-                    '你是待辦清單 App「TodoMaster」的任務建立助手。使用者會用口語描述想做的事，請把它整理成要「新增」的任務清單。你只能新增任務，不能修改或刪除任何既有任務。',
+                    '你是待辦清單 App「TodoMaster」的任務建立助手。使用者會用口語描述想做的事，請把它整理成任務清單。若描述的是既有任務（同一件事、要改時間、要補充內容），用 duplicateOf 指向該既有任務，App 會把它當成「編輯既有任務」處理；其餘當成新任務。你不能刪除任何任務。',
                     '',
                     `今天是 ${days[0]}。之後的日期對照：${days.slice(1).join('、')}。`,
                     '「這週／本週」「下週」以週一為一週開始；「下週二」指下一個週一開始那週的週二。',
@@ -5195,7 +5245,7 @@
                     '- 重複性任務（每天、每3天、每週…）：recurringInterval 填間隔天數（每天 1、每週 7）；提到次數填 recurringCount；提到結束日期填 recurringUntil（YYYY-MM-DD）；不知道就 null。重複任務必須是 scheduled，沒說從哪天開始就從今天開始。非重複任務這三欄都是 null。',
                     '- reason：用一句繁體中文簡述你為何這樣分類與設定（給使用者確認用）。',
                     existing.length
-                        ? `- duplicateOf：目前未完成的既有任務標題有：${existing.map(t => `「${t}」`).join('')}。若新任務與其中某個標題相同或高度相似（例：「運動-拉筋運動」與「拉筋」），填該既有標題（必須與清單中的文字完全一致）；沒有相似的就填 null。你仍要照常產出這個任務，只是標註。`
+                        ? `- duplicateOf：目前未完成的既有任務標題有：${existing.map(t => `「${t}」`).join('')}。若新任務與其中某個標題相同或高度相似（例：「運動-拉筋運動」與「拉筋」），填該既有標題（必須與清單中的文字完全一致）；使用者說「把X改到明天」「X 再加註…」這類修改既有任務的話也要填。沒有相似的就填 null。你仍要照常產出這個任務的完整欄位（日期、時刻、附註依使用者這次的描述），只是標註。`
                         : '- duplicateOf：目前沒有既有任務，一律填 null。',
                     '',
                     '一段話裡有多件事就拆成多個任務；同一件事不要重複。若內容完全不是可做的事，回傳空的 tasks 陣列。'
@@ -5309,7 +5359,7 @@
                 }
 
                 const estimatedTime = TIME_META[d.estimatedTime] ? d.estimatedTime : '30min';
-                return {
+                const draft = {
                     title,
                     description: String(d.description || '').trim(),
                     dateMode,
@@ -5325,6 +5375,11 @@
                     // 只接受確實存在的既有標題，避免模型幻覺
                     duplicateOf: typeof d.duplicateOf === 'string' && this._aiExistingTitles().includes(d.duplicateOf.trim()) ? d.duplicateOf.trim() : ''
                 };
+                // 對應到既有任務：預先算好要編輯的欄位
+                const target = draft.duplicateOf ? this._aiFindExisting(draft.duplicateOf) : null;
+                draft.targetId = target ? target.id : null;
+                draft.diff = target ? this._aiDiff(draft, target) : null;
+                return draft;
             }
 
             async runAiParse() {
@@ -5339,7 +5394,7 @@
                 try {
                     const drafts = (await this._aiRequest(text)).map(d => this.normalizeAiDraft(d)).filter(Boolean);
                     this.renderAiPreview(drafts);
-                    this._aiSetMsg(drafts.length ? `解析出 ${drafts.length} 項任務，確認或微調後按「加入」` : '沒有解析出任務，請換個說法再試', drafts.length ? 'ok' : 'err');
+                    this._aiSetMsg(drafts.length ? `解析出 ${drafts.length} 項任務，確認或微調後按「套用」` : '沒有解析出任務，請換個說法再試', drafts.length ? 'ok' : 'err');
                 } catch (e) {
                     this._aiSetMsg('⚠️ ' + (e && e.message ? e.message : e), 'err');
                 } finally {
@@ -5356,11 +5411,21 @@
                 box.innerHTML = drafts.map((d, i) => {
                     const rec = d.recurring;
                     const recText = rec ? `🔁 每${rec.interval}天${rec.repeatCount ? ` 共${rec.repeatCount}次` : ''}${rec.untilDate ? ` 至 ${rec.untilDate}` : ''}` : '';
+                    const diff = d.diff;
+                    const same = diff && !diff.changes.length;
+                    const dupBox = !diff ? '' : `
+                            <div class="ai-dup">
+                                <select class="ai-f-action" aria-label="處理方式">
+                                    <option value="update">${same ? '✅ 與既有' : '✏️ 更新既有'}「${escapeHtml(d.duplicateOf)}」${same ? '相符，維持現狀' : ''}</option>
+                                    <option value="create">➕ 仍新增為新任務</option>
+                                </select>
+                                ${same ? '' : `<ul class="ai-diff">${diff.changes.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>`}
+                            </div>`;
                     return `
                     <div class="ai-card" data-i="${i}">
-                        <input type="checkbox" class="ai-f-on" checked aria-label="加入這項">
+                        <input type="checkbox" class="ai-f-on"${same ? '' : ' checked'} aria-label="套用這項">
                         <div class="ai-card-body">
-                            <input type="text" class="ai-f-title" value="${escapeHtml(d.title)}" aria-label="任務名稱">
+                            <input type="text" class="ai-f-title" value="${escapeHtml(d.title)}" aria-label="任務名稱">${dupBox}
                             <div class="ai-card-row">
                                 <select class="ai-f-dateMode" aria-label="日期模式">${opts(dateModes, d.dateMode, v => v)}</select>
                                 <input type="date" class="ai-f-date" value="${escapeHtml(d.date)}" aria-label="日期">
@@ -5376,7 +5441,6 @@
                                 ${d.description ? `<div>📝 ${escapeHtml(d.description)}</div>` : ''}
                                 ${d.tags.length ? `<div>🏷️ ${d.tags.map(escapeHtml).join('、')}</div>` : ''}
                                 ${rec ? `<div><label><input type="checkbox" class="ai-f-rec" checked> ${escapeHtml(recText)}</label></div>` : ''}
-                                ${d.duplicateOf ? `<div class="ai-dup">⚠️ 目前已有任務「${escapeHtml(d.duplicateOf)}」，請確認是否新增</div>` : ''}
                                 ${d.reason ? `<div>💡 ${escapeHtml(d.reason)}</div>` : ''}
                             </div>
                         </div>
@@ -5386,6 +5450,9 @@
 
                 const sync = card => {
                     const q = s => card.querySelector(s);
+                    const upd = q('.ai-f-action')?.value === 'update';
+                    card.classList.toggle('upd', upd);
+                    q('.ai-f-title').readOnly = upd;
                     const scheduled = q('.ai-f-dateMode').value === 'scheduled';
                     q('.ai-f-date').style.display = scheduled ? '' : 'none';
                     q('.ai-f-time').style.display = scheduled ? '' : 'none';
@@ -5401,19 +5468,29 @@
 
             _aiUpdateAddBtn() {
                 const btn = document.getElementById('aiAddSelectedBtn');
-                const n = document.querySelectorAll('#aiPreview .ai-f-on:checked').length;
+                let add = 0, upd = 0;
+                document.querySelectorAll('#aiPreview .ai-card').forEach(card => {
+                    if (!card.querySelector('.ai-f-on').checked) return;
+                    if (card.querySelector('.ai-f-action')?.value === 'update') upd++; else add++;
+                });
                 btn.style.display = document.querySelector('#aiPreview .ai-card') ? '' : 'none';
-                btn.disabled = n === 0;
-                btn.textContent = `加入勾選的 ${n} 項`;
+                btn.disabled = add + upd === 0;
+                btn.textContent = upd ? `套用：新增 ${add} 項、更新 ${upd} 項` : `加入勾選的 ${add} 項`;
             }
 
-            // 讀回預覽卡片目前的值，組成與 saveTask() 相同形狀的 taskData，只透過 addTask() 新增
+            // 讀回預覽卡片目前的值：新增者組成與 saveTask() 相同形狀的 taskData 交給 addTask()；
+            // 「更新既有」者只套用 _aiDiff 算出的欄位（updateTask）
             addAiSelectedTasks() {
                 const cards = [...document.querySelectorAll('#aiPreview .ai-card')].filter(c => c.querySelector('.ai-f-on').checked);
                 const taskDatas = [];
+                const edits = [];
                 for (const card of cards) {
                     const q = s => card.querySelector(s);
                     const draft = this.aiDrafts[Number(card.dataset.i)];
+                    if (q('.ai-f-action')?.value === 'update') {
+                        if (draft.targetId && Object.keys(draft.diff.updates).length) edits.push(draft);
+                        continue;
+                    }
                     const title = q('.ai-f-title').value.trim();
                     if (!title) { alert('有勾選的任務沒有名稱，請補上或取消勾選'); q('.ai-f-title').focus(); return; }
                     const dateMode = q('.ai-f-dateMode').value;
@@ -5447,11 +5524,21 @@
                         pinned: null
                     });
                 }
-                if (!taskDatas.length) return;
+                if (!taskDatas.length && !edits.length) return;
                 taskDatas.forEach(data => this.recomputeRecurringUntil(this.addTask(data)));
+                let updated = 0;
+                for (const draft of edits) {
+                    const task = this.getTaskById(draft.targetId);
+                    if (!task) continue;
+                    this.updateTask(task.id, draft.diff.updates);
+                    // 比照 saveTask() 收尾：群組重複任務重算群組日期，其餘校正重複任務結束日
+                    if (task.groupId && task.recurring && task.recurring.enabled) this.updateGroupTaskDates(task.groupId, task.id);
+                    else if (!task.groupId) this.recomputeRecurringUntil(task);
+                    updated++;
+                }
                 this.saveToStorage();
                 this.updateUI();
-                this.showNotification(`✨ 已加入 ${taskDatas.length} 項任務`);
+                this.showNotification(updated ? `✨ 已新增 ${taskDatas.length} 項、更新 ${updated} 項任務` : `✨ 已加入 ${taskDatas.length} 項任務`);
                 document.getElementById('aiInput').value = '';
                 document.getElementById('aiPreview').innerHTML = '';
                 this.aiDrafts = [];
