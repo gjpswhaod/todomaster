@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.7 - 任務管理工具</title>
+    <title>TodoMaster v6.5.8 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -629,6 +629,12 @@
             border-radius: 6px;
         }
 
+        .task-description a.desc-link {
+            color: var(--accent-primary);
+            text-decoration: underline;
+            word-break: break-all;
+        }
+
         .task-tags {
             display: flex;
             flex-wrap: wrap;
@@ -1155,7 +1161,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.7';
+        const APP_VERSION = 'v6.5.8';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         const CATEGORY_META = {
@@ -1191,6 +1197,14 @@
         function escapeHtml(v) {
             const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
             return String(v ?? '').replace(/[&<>"']/g, m => map[m]);
+        }
+        // 純文字 → 安全 HTML，並把 http(s):// 網址轉為可點擊連結（結尾標點不納入連結）
+        function linkifyText(v) {
+            return escapeHtml(v).replace(/https?:\/\/[^\s<>"]+/g, m => {
+                const trail = (m.match(/(?:[.,;:!?)\]、，。；：！？）」』]|&#039;|&quot;)+$/) || [''])[0];
+                const url = trail ? m.slice(0, -trail.length) : m;
+                return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="desc-link">${url}</a>${trail}`;
+            });
         }
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -3536,7 +3550,7 @@
                             ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                         </div>
                         <div class="task-content">
-                            ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
+                            ${task.description ? `<div class="task-description">${linkifyText(task.description)}</div>` : ''}
                             <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
@@ -3690,7 +3704,8 @@
                 li.addEventListener('click', (e) => {
                     if (!e.target.classList.contains('task-block') && e.target !== checkbox
                         && !e.target.classList.contains('reschedule-today-btn')
-                        && !e.target.closest('.staging-actions') && !e.target.closest('.subtask-add-btn')) {
+                        && !e.target.closest('.staging-actions') && !e.target.closest('.subtask-add-btn')
+                        && !e.target.closest('a.desc-link')) {
                         this.openEditModal(task.id);
                     }
                 });
@@ -4110,7 +4125,7 @@
                         }
 
                         if (targetId === 'compressBtn') {
-                            const count = this.tasks.filter(t => t.completed && !t.compressed).length;
+                            const count = this.tasks.filter(t => t.completed && !t.compressed && !isSubtask(t)).length;
                             if (count === 0) {
                                 const removed = this.purgeOldData();
                                 if (removed > 0) this.updateUI();
