@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.6.0 - 任務管理工具</title>
+    <title>TodoMaster v6.6.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -610,10 +610,20 @@
         .catalog-row input { padding: 6px 8px; border: 1px solid var(--bg-tertiary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 14px; }
         .catalog-row .catalog-emoji { width: 3.2em; text-align: center; flex: none; }
         .catalog-row .catalog-name { flex: 1; min-width: 0; }
-        .catalog-emoji-static { width: 3.2em; text-align: center; flex: none; }
+        .catalog-row .catalog-color { width: 34px; height: 30px; padding: 2px; flex: none; cursor: pointer; }
         .catalog-row.catalog-deleted .catalog-name { text-decoration: line-through; opacity: 0.5; }
+        .catalog-row.catalog-dragging { opacity: 0.6; outline: 2px dashed var(--text-secondary); border-radius: 6px; }
+        .catalog-handle { cursor: grab; touch-action: none; user-select: none; padding: 4px 2px; color: var(--text-secondary); flex: none; }
+        .catalog-section { margin-bottom: 8px; }
+        .catalog-add { margin-top: 2px; }
         .catalog-empty { color: var(--text-secondary); font-size: 0.85em; margin-bottom: 6px; }
         #catalogBody { max-height: 60vh; overflow-y: auto; }
+
+        /* 側欄標題右側的 ✏️ ＋：與標題文字同大小 */
+        .section-title-row { display: flex; align-items: center; justify-content: space-between; }
+        .section-actions { display: inline-flex; gap: 6px; }
+        .section-icon-btn { background: none; border: none; padding: 0 2px; margin: 0; font: inherit; font-size: inherit; line-height: 1; color: inherit; cursor: pointer; opacity: 0.8; }
+        .section-icon-btn:hover { opacity: 1; color: var(--text-primary); }
 
         .task-meta {
             display: flex;
@@ -1173,27 +1183,42 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.6.0';
+        const APP_VERSION = 'v6.6.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
-        // 分類固定 4 個 key（顏色綁 key）；名稱與 emoji 可由使用者自訂（catalog.categories），applyCategoryCatalog() 覆寫進 CATEGORY_META
+        // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
+        // applyCategoryCatalog() 依 order 重建 CATEGORY_META（物件鍵順序即顯示順序）
         const CATEGORY_DEFAULTS = {
-            career: { emoji: '💼', label: '事業' },
-            recharge: { emoji: '⚡', label: '充電活動' },
-            life: { emoji: '🏠', label: '生活必須' },
-            review: { emoji: '🔍', label: '復盤' }
+            career: { emoji: '💼', label: '事業', color: '#4a9eff' },
+            recharge: { emoji: '⚡', label: '充電活動', color: '#a78bfa' },
+            life: { emoji: '🏠', label: '生活必須', color: '#34d399' },
+            review: { emoji: '🔍', label: '復盤', color: '#fbbf24' }
         };
         const CATEGORY_META = Object.fromEntries(Object.entries(CATEGORY_DEFAULTS).map(([k, v]) => [k, { ...v }]));
+        // 依 order 排序 keys；沒有 order 的以它在原清單的位置當作 order（同值時維持原順序）
+        function sortKeysByOrder(keys, orderOf) {
+            return keys.map((k, i) => { const o = orderOf(k); return { k, i, o: Number.isFinite(o) ? o : i }; })
+                .sort((a, b) => (a.o - b.o) || (a.i - b.i))
+                .map(x => x.k);
+        }
         function applyCategoryCatalog(catalog) {
             const over = (catalog && catalog.categories) || {};
-            for (const [k, def] of Object.entries(CATEGORY_DEFAULTS)) {
+            const keys = [...Object.keys(CATEGORY_DEFAULTS), ...Object.keys(over).filter(k => !CATEGORY_DEFAULTS[k] && over[k].label)];
+            for (const k of Object.keys(CATEGORY_META)) delete CATEGORY_META[k];
+            for (const k of sortKeysByOrder(keys, k => over[k] && over[k].order)) {
+                const def = CATEGORY_DEFAULTS[k] || { emoji: '📁', label: k, color: '#94a3b8' };
                 const o = over[k] || {};
-                CATEGORY_META[k] = { emoji: o.emoji || def.emoji, label: o.label || def.label };
+                CATEGORY_META[k] = { emoji: o.emoji || def.emoji, label: o.label || def.label, color: o.color || def.color };
             }
         }
         function categoryText(key) {
             const m = CATEGORY_META[key];
             return m ? `${m.emoji} ${m.label}` : String(key || '');
+        }
+        // 分類徽章的顏色（自訂分類與改色都適用）：#rrggbb → 文字色 + 20% 透明背景
+        function categoryStyle(key) {
+            const c = CATEGORY_META[key] && CATEGORY_META[key].color;
+            return /^#[0-9a-f]{6}$/i.test(c || '') ? `color:${c};background-color:${c}33;` : '';
         }
         const TIME_META = {
             '10min': { emoji: '⏱️', label: '10分鐘' },
@@ -1346,33 +1371,17 @@
             </div>
 
             <div class="sidebar-section">
-                <div class="sidebar-section-title" style="display:flex;align-items:center;justify-content:space-between;">分類<button type="button" class="btn btn-secondary btn-small" id="catalogEditBtn" title="編輯分類／群組／標籤名稱">✏️ 編輯</button></div>
-                <button class="filter-item" data-filter="category:career">
-                    <span class="filter-icon" data-cat-emoji="career">💼</span>
-                    <span data-cat-label="career">事業</span>
-                </button>
-                <button class="filter-item" data-filter="category:recharge">
-                    <span class="filter-icon" data-cat-emoji="recharge">⚡</span>
-                    <span data-cat-label="recharge">充電活動</span>
-                </button>
-                <button class="filter-item" data-filter="category:life">
-                    <span class="filter-icon" data-cat-emoji="life">🏠</span>
-                    <span data-cat-label="life">生活必須</span>
-                </button>
-                <button class="filter-item" data-filter="category:review">
-                    <span class="filter-icon" data-cat-emoji="review">🔍</span>
-                    <span data-cat-label="review">復盤</span>
-                </button>
+                <div class="sidebar-section-title section-title-row"><span>分類</span><span class="section-actions"><button type="button" class="section-icon-btn" data-edit="categories" title="編輯分類">✏️</button><button type="button" class="section-icon-btn" data-add="categories" title="新增分類">＋</button></span></div>
+                <div class="filter-list" id="categoryFilterList"></div>
             </div>
 
             <div class="sidebar-section">
-                <div class="sidebar-section-title">我的標籤</div>
+                <div class="sidebar-section-title section-title-row"><span>我的標籤</span><span class="section-actions"><button type="button" class="section-icon-btn" data-edit="tags" title="編輯標籤">✏️</button><button type="button" class="section-icon-btn" data-add="tags" title="新增標籤">＋</button></span></div>
                 <div class="tag-container" id="tagContainer"></div>
-                <button class="btn btn-secondary btn-small" id="addTagBtn">+ 新增標籤</button>
             </div>
 
-            <div class="sidebar-section" id="groupContainer" style="display: none;">
-                <div class="sidebar-section-title">迴圈群組</div>
+            <div class="sidebar-section" id="groupContainer">
+                <div class="sidebar-section-title section-title-row"><span>迴圈群組</span><span class="section-actions"><button type="button" class="section-icon-btn" data-edit="groups" title="編輯群組">✏️</button><button type="button" class="section-icon-btn" data-add="groups" title="新增群組">＋</button></span></div>
                 <div class="filter-list"></div>
             </div>
 
@@ -1639,27 +1648,6 @@
         </div>
     </div>
 
-    <!-- 新增標籤模態框 -->
-    <div class="modal" id="tagModal">
-        <div class="modal-content">
-            <div class="modal-header">新增標籤</div>
-            <form id="tagForm">
-                <div class="form-group">
-                    <label>標籤名稱</label>
-                    <input type="text" id="tagName" required>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal('tagModal')">
-                        取消
-                    </button>
-                    <button type="submit" class="btn btn-primary">
-                        新增
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-
     <!-- 雲端同步設定模態框 -->
     <div class="modal" id="syncModal">
         <div class="modal-content" style="max-width: 480px;">
@@ -1910,7 +1898,7 @@
         // 資料主體仍是 localStorage；GitHub 私有 repo 內的 state.json 只是各裝置合併後的共同狀態。
 
         // SYNC-CORE-BEGIN
-        const SYNC_SCHEMA = 3;                 // state.json 資料版本（1 = v6.2 以前的備份檔：缺 updatedAt / deletedTasks；3 = v6.6.0 起含 catalog）
+        const SYNC_SCHEMA = 4;                 // state.json 資料版本（1 = v6.2 以前的備份檔：缺 updatedAt / deletedTasks；3 = v6.6.0 起含 catalog）
         const SYNC_TOMBSTONE_DAYS = 30;        // 刪除標記保留天數（與「完成超過 30 天即清除」對齊）
         const SYNC_TOMBSTONE_MS = SYNC_TOMBSTONE_DAYS * 86400000;
         const SYNC_DATA_PATH = 'state.json';
@@ -1981,12 +1969,14 @@
             });
         }
 
-        // ===== 名稱目錄（v6.6.0）：分類名稱/emoji、群組名稱、標籤改名紀錄 =====
-        // catalog = { categories: { key: {emoji, label, at} }, groups: { groupId: {name, at} }, tagRenames: { 舊名: {to: 新名|null, at} } }
+        // ===== 名稱目錄（v6.6.0；v6.6.1 加 emoji/顏色/順序/新增項目）=====
+        // catalog = { categories: { key: {emoji, label, color, order, at} }, groups: { groupId: {name, emoji, order, at} },
+        //             tagRenames: { 舊名: {to: 新名|null, at} }, tagMeta: { 標籤名: {emoji, order, at} } }
+        // 新增的分類 key = c_xxx、新增的群組 id = grp_xxx（尚無任務時只存在 catalog）
         // 各鍵以 at 較晚者為準；tagRenames 讓另一台裝置帶著舊標籤名合併時也會被改名（to=null 代表已刪除），
         // to 等於自己代表「此名稱目前有效」（改回舊名或重新新增被刪過的標籤時寫入，用來蓋掉較早的改名/刪除紀錄）
-        const CATALOG_KEYS = ['categories', 'groups', 'tagRenames'];
-        function emptyCatalog() { return { categories: {}, groups: {}, tagRenames: {} }; }
+        const CATALOG_KEYS = ['categories', 'groups', 'tagRenames', 'tagMeta'];
+        function emptyCatalog() { return { categories: {}, groups: {}, tagRenames: {}, tagMeta: {} }; }
         function normalizeCatalog(c) {
             const out = emptyCatalog();
             if (!c || typeof c !== 'object') return out;
@@ -2890,6 +2880,7 @@
                 this._fpMap = new Map();  // 任務指紋快照 id → { c: 內容, o: 排序 }，saveToStorage 靠它找出「哪些任務變動了」
                 this._metaFp = '';        // tags + overdueLossLog + catalog 的指紋
                 this.currentFilter = 'all';
+                this.tagFilter = [];      // 側欄複選的標籤（currentFilter === 'tags' 時生效，不保存）
                 this.sortMode = 'drag'; // 'drag' 或 'fixed'
                 this.showCompleted = true;
                 this.searchQuery = '';    // 任務名稱搜尋關鍵字（不保存，重開 App 清空）
@@ -3305,7 +3296,7 @@
 
             _now() { return this.cloud ? this.cloud.now() : Date.now(); }
 
-            // ===== 名稱目錄：分類／群組／標籤統一編輯（v6.6.0）=====
+            // ===== 名稱目錄：分類／群組／標籤統一編輯（v6.6.0；v6.6.1 加新增、emoji、拖曳排序）=====
             groupDisplayName(groupId) {
                 const g = this.catalog.groups[groupId];
                 if (g && g.name) return g.name;
@@ -3313,55 +3304,170 @@
                 return t ? t.groupName : String(groupId);
             }
 
-            // 側欄分類按鈕與表單分類下拉依 CATEGORY_META 更新文字（按鈕本身是靜態的，點擊綁定不變）
-            renderCategories() {
-                document.querySelectorAll('[data-cat-emoji]').forEach(el => { el.textContent = CATEGORY_META[el.dataset.catEmoji]?.emoji || ''; });
-                document.querySelectorAll('[data-cat-label]').forEach(el => { el.textContent = CATEGORY_META[el.dataset.catLabel]?.label || ''; });
-                const sel = document.getElementById('category');
-                const cur = sel.value || 'career';
-                sel.innerHTML = Object.keys(CATEGORY_META).map(k => `<option value="${k}">${escapeHtml(categoryText(k))}</option>`).join('');
-                sel.value = cur;
+            groupEmoji(groupId) {
+                const g = this.catalog.groups[groupId];
+                return (g && g.emoji) || '🔁';
             }
 
-            // 開啟「編輯分類／群組／標籤」視窗
-            openCatalogModal() {
-                const catRows = Object.keys(CATEGORY_DEFAULTS).map(k => `
-                    <div class="catalog-row" data-cat="${k}">
-                        <input type="text" class="catalog-emoji" maxlength="4" value="${escapeHtml(CATEGORY_META[k].emoji)}" aria-label="圖示">
-                        <input type="text" class="catalog-name" maxlength="20" value="${escapeHtml(CATEGORY_META[k].label)}" aria-label="名稱">
-                        <button type="button" class="btn btn-secondary btn-small catalog-reset" title="恢復預設：${escapeHtml(CATEGORY_DEFAULTS[k].emoji + ' ' + CATEGORY_DEFAULTS[k].label)}">↺</button>
-                    </div>`).join('');
-                const groupIds = [...new Set(this.tasks.filter(t => t.groupId).map(t => t.groupId))];
-                const groupRows = groupIds.length ? groupIds.map(id => `
-                    <div class="catalog-row" data-group="${escapeHtml(id)}">
-                        <span class="catalog-emoji-static">🔁</span>
-                        <input type="text" class="catalog-name" maxlength="40" value="${escapeHtml(this.groupDisplayName(id))}" aria-label="群組名稱">
-                    </div>`).join('') : '<div class="catalog-empty">（目前沒有群組）</div>';
-                const tagRows = this.tags.length ? this.tags.map(tag => `
-                    <div class="catalog-row" data-tag="${escapeHtml(tag)}">
-                        <span class="catalog-emoji-static">🏷️</span>
-                        <input type="text" class="catalog-name" maxlength="40" value="${escapeHtml(tag)}" aria-label="標籤名稱">
-                        <button type="button" class="btn btn-danger btn-small catalog-del" title="刪除標籤（從所有任務移除）">🗑️</button>
-                    </div>`).join('') : '<div class="catalog-empty">（目前沒有標籤）</div>';
+            tagText(tag) {
+                const m = this.catalog.tagMeta[tag];
+                return m && m.emoji ? `${m.emoji} ${tag}` : tag;
+            }
+
+            // 依 catalog.tagMeta 的 order 排序後的標籤清單（側欄、表單、編輯視窗共用）
+            sortedTags() {
+                return sortKeysByOrder([...this.tags], g => this.catalog.tagMeta[g] && this.catalog.tagMeta[g].order);
+            }
+
+            // 所有群組 id：任務中的群組 ∪ 編輯視窗新增的群組（grp_xxx），依 order 排序。
+            // recurringOnly：側欄只列「有啟用迴圈任務」的群組（沿用舊行為），新增但尚無任務的群組一律列出
+            allGroupIds(recurringOnly = false) {
+                const ids = [];
+                this.tasks.forEach(t => {
+                    if (t.groupId && (!recurringOnly || (t.recurring && t.recurring.enabled)) && !ids.includes(t.groupId)) ids.push(t.groupId);
+                });
+                Object.keys(this.catalog.groups).forEach(id => {
+                    if (id.startsWith('grp_') && !ids.includes(id)) ids.push(id);
+                });
+                return sortKeysByOrder(ids, id => this.catalog.groups[id] && this.catalog.groups[id].order);
+            }
+
+            // 側欄篩選按鈕的共用點擊：選取 + 手機版自動收合側欄
+            _pickFilter(btn, filterValue) {
+                this.selectFilterButton(btn, filterValue);
+                if (window.innerWidth <= 768) this.closeSidebarOverlay();
+            }
+
+            // 側欄分類按鈕（依 CATEGORY_META 順序動態產生）與表單分類下拉
+            renderCategories() {
+                const list = document.getElementById('categoryFilterList');
+                list.innerHTML = '';
+                Object.keys(CATEGORY_META).forEach(k => {
+                    const f = `category:${k}`;
+                    const btn = document.createElement('button');
+                    btn.className = 'filter-item';
+                    if (this.currentFilter === f) btn.classList.add('active');
+                    btn.dataset.filter = f;
+                    btn.innerHTML = `<span class="filter-icon">${escapeHtml(CATEGORY_META[k].emoji)}</span>${escapeHtml(CATEGORY_META[k].label)}`;
+                    btn.onclick = () => this._pickFilter(btn, f);
+                    list.appendChild(btn);
+                });
+                const sel = document.getElementById('category');
+                const cur = sel.value || 'career';
+                sel.innerHTML = Object.keys(CATEGORY_META).map(k => `<option value="${escapeHtml(k)}">${escapeHtml(categoryText(k))}</option>`).join('');
+                sel.value = CATEGORY_META[cur] ? cur : 'career';
+            }
+
+            // 編輯視窗一列：kind = categories | groups | tags；key 為 null 代表新增列
+            _catalogRowHtml(kind, key, d) {
+                const keyAttr = key === null ? 'data-new="1"' : `data-key="${escapeHtml(key)}"`;
+                const ph = { categories: '分類名稱', groups: '群組名稱', tags: '標籤名稱' }[kind];
+                let extra = '';
+                if (kind === 'categories') {
+                    extra = `<input type="color" class="catalog-color" value="${escapeHtml(d.color || '#94a3b8')}" aria-label="顏色">`;
+                    if (key !== null && CATEGORY_DEFAULTS[key]) {
+                        const def = CATEGORY_DEFAULTS[key];
+                        extra += `<button type="button" class="btn btn-secondary btn-small catalog-reset" title="恢復預設：${escapeHtml(def.emoji + ' ' + def.label)}">↺</button>`;
+                    }
+                } else if (kind === 'tags' && key !== null) {
+                    extra = '<button type="button" class="btn btn-danger btn-small catalog-del" title="刪除標籤（從所有任務移除）">🗑️</button>';
+                }
+                return `
+                    <div class="catalog-row" ${keyAttr}>
+                        <span class="catalog-handle" title="拖曳排序">⋮⋮</span>
+                        <input type="text" class="catalog-emoji" maxlength="4" value="${escapeHtml(d.emoji || '')}" placeholder="${kind === 'tags' ? '🏷️' : ''}" aria-label="圖示">
+                        <input type="text" class="catalog-name" maxlength="40" value="${escapeHtml(d.name || '')}" placeholder="${ph}" aria-label="名稱">
+                        ${extra}
+                    </div>`;
+            }
+
+            // 開啟「編輯分類／群組／標籤」視窗；section 指定時捲到該段，add 時在該段末尾直接加一列新列
+            openCatalogModal(section = null, add = false) {
+                const sectionHtml = (kind, title, rows) => `
+                    <div class="catalog-section" data-kind="${kind}">
+                        <div class="catalog-section-title">${title}</div>
+                        <div class="catalog-list">${rows}</div>
+                        <button type="button" class="btn btn-secondary btn-small catalog-add">＋ 新增${title.replace('迴圈', '')}</button>
+                    </div>`;
+                const catRows = Object.keys(CATEGORY_META).map(k =>
+                    this._catalogRowHtml('categories', k, { emoji: CATEGORY_META[k].emoji, name: CATEGORY_META[k].label, color: CATEGORY_META[k].color })).join('');
+                const groupRows = this.allGroupIds().map(id =>
+                    this._catalogRowHtml('groups', id, { emoji: this.groupEmoji(id), name: this.groupDisplayName(id) })).join('');
+                const tagRows = this.sortedTags().map(tag =>
+                    this._catalogRowHtml('tags', tag, { emoji: (this.catalog.tagMeta[tag] && this.catalog.tagMeta[tag].emoji) || '', name: tag })).join('');
 
                 const body = document.getElementById('catalogBody');
-                body.innerHTML = `
-                    <div class="catalog-section-title">分類（名稱與圖示）</div>${catRows}
-                    <div class="catalog-section-title">迴圈群組</div>${groupRows}
-                    <div class="catalog-section-title">標籤</div>${tagRows}`;
-                body.querySelectorAll('.catalog-reset').forEach(btn => btn.onclick = () => {
-                    const row = btn.closest('.catalog-row'), def = CATEGORY_DEFAULTS[row.dataset.cat];
-                    row.querySelector('.catalog-emoji').value = def.emoji;
-                    row.querySelector('.catalog-name').value = def.label;
-                });
-                body.querySelectorAll('.catalog-del').forEach(btn => btn.onclick = () => {
+                body.innerHTML = sectionHtml('categories', '分類', catRows)
+                    + sectionHtml('tags', '標籤', tagRows)
+                    + sectionHtml('groups', '迴圈群組', groupRows);
+
+                const addRow = (sec) => {
+                    const kind = sec.dataset.kind;
+                    const d = kind === 'categories' ? { emoji: '📁', color: '#94a3b8' } : kind === 'groups' ? { emoji: '🔁' } : {};
+                    sec.querySelector('.catalog-list').insertAdjacentHTML('beforeend', this._catalogRowHtml(kind, null, d));
+                    const input = sec.querySelector('.catalog-row:last-child .catalog-name');
+                    input.focus();
+                    input.scrollIntoView({ block: 'nearest' });
+                };
+                body.onclick = (e) => {
+                    const btn = e.target.closest('button');
+                    if (!btn) return;
                     const row = btn.closest('.catalog-row');
-                    const del = row.classList.toggle('catalog-deleted');
-                    row.querySelector('.catalog-name').disabled = del;
-                    btn.textContent = del ? '↩️' : '🗑️';
-                    btn.title = del ? '取消刪除' : '刪除標籤（從所有任務移除）';
-                });
+                    if (btn.classList.contains('catalog-add')) {
+                        addRow(btn.closest('.catalog-section'));
+                    } else if (btn.classList.contains('catalog-reset')) {
+                        const def = CATEGORY_DEFAULTS[row.dataset.key];
+                        row.querySelector('.catalog-emoji').value = def.emoji;
+                        row.querySelector('.catalog-name').value = def.label;
+                        row.querySelector('.catalog-color').value = def.color;
+                    } else if (btn.classList.contains('catalog-del')) {
+                        const del = row.classList.toggle('catalog-deleted');
+                        row.querySelectorAll('input').forEach(el => { el.disabled = del; });
+                        btn.textContent = del ? '↩️' : '🗑️';
+                        btn.title = del ? '取消刪除' : '刪除標籤（從所有任務移除）';
+                    }
+                };
+                this._bindCatalogDrag(body);
                 this.openModal('catalogModal');
+
+                if (section) {
+                    const sec = body.querySelector(`.catalog-section[data-kind="${section}"]`);
+                    if (sec) {
+                        if (add) addRow(sec);
+                        else sec.scrollIntoView({ block: 'start' });
+                    }
+                }
+            }
+
+            // 拖曳把手排序（pointer events：滑鼠與手機觸控通用），只在同一段內移動
+            _bindCatalogDrag(body) {
+                body.onpointerdown = (e) => {
+                    const handle = e.target.closest('.catalog-handle');
+                    if (!handle) return;
+                    e.preventDefault();
+                    const row = handle.closest('.catalog-row');
+                    const list = row.parentElement;
+                    row.classList.add('catalog-dragging');
+                    try { handle.setPointerCapture(e.pointerId); } catch (_) { /* 模擬事件時可能沒有對應的 pointer */ }
+                    const move = (ev) => {
+                        const others = [...list.querySelectorAll('.catalog-row:not(.catalog-dragging)')];
+                        const before = others.find(r => {
+                            const b = r.getBoundingClientRect();
+                            return ev.clientY < b.top + b.height / 2;
+                        });
+                        if (before) { if (row.nextElementSibling !== before) list.insertBefore(row, before); }
+                        else if (list.lastElementChild !== row) list.appendChild(row);
+                    };
+                    const up = () => {
+                        row.classList.remove('catalog-dragging');
+                        handle.removeEventListener('pointermove', move);
+                        handle.removeEventListener('pointerup', up);
+                        handle.removeEventListener('pointercancel', up);
+                    };
+                    handle.addEventListener('pointermove', move);
+                    handle.addEventListener('pointerup', up);
+                    handle.addEventListener('pointercancel', up);
+                };
             }
 
             saveCatalogModal() {
@@ -3369,75 +3475,112 @@
                 const now = this._now();
                 const cat = this.catalog;
 
+                const rowsOf = (kind) => [...body.querySelectorAll(`.catalog-section[data-kind="${kind}"] .catalog-row`)].map(row => ({
+                    key: row.dataset.key !== undefined ? row.dataset.key : null,
+                    isNew: !!row.dataset.new,
+                    emoji: row.querySelector('.catalog-emoji').value.trim(),
+                    name: row.querySelector('.catalog-name').value.trim(),
+                    color: row.querySelector('.catalog-color') ? row.querySelector('.catalog-color').value : null,
+                    deleted: row.classList.contains('catalog-deleted')
+                })).filter(r => !(r.isNew && !r.name));   // 沒填名稱的新增列直接略過
+                const cats = rowsOf('categories'), groups = rowsOf('groups'), tagRows = rowsOf('tags');
+
                 // 1) 檢查
-                const catRows = [...body.querySelectorAll('.catalog-row[data-cat]')];
-                for (const row of catRows) {
-                    if (!row.querySelector('.catalog-name').value.trim()) { alert('分類名稱不可空白'); return; }
+                const label = { categories: '分類', groups: '群組', tags: '標籤' };
+                for (const [kind, rows] of [['categories', cats], ['groups', groups], ['tags', tagRows]]) {
+                    if (rows.some(r => !r.deleted && !r.name)) {
+                        alert(`${label[kind]}名稱不可空白${kind === 'tags' ? '（要移除請按 🗑️）' : ''}`);
+                        return;
+                    }
                 }
-                const groupRows = [...body.querySelectorAll('.catalog-row[data-group]')];
-                for (const row of groupRows) {
-                    if (!row.querySelector('.catalog-name').value.trim()) { alert('群組名稱不可空白'); return; }
+                for (const [kind, rows] of [['categories', cats], ['groups', groups]]) {
+                    const names = rows.map(r => r.name);
+                    if (new Set(names).size !== names.length) { alert(`有重複的${label[kind]}名稱，請修改後再儲存`); return; }
                 }
-                const tagEdits = [...body.querySelectorAll('.catalog-row[data-tag]')].map(row => ({
-                    from: row.dataset.tag,
-                    to: row.classList.contains('catalog-deleted') ? null : row.querySelector('.catalog-name').value.trim()
-                }));
-                if (tagEdits.some(e => e.to === '')) { alert('標籤名稱不可空白（要移除請按 🗑️）'); return; }
-                const finalNames = tagEdits.filter(e => e.to !== null).map(e => e.to);
-                if (new Set(finalNames).size !== finalNames.length
-                    && !confirm('有標籤改成相同名稱，將合併為同一個標籤，確定嗎？')) return;
-                const delCount = tagEdits.filter(e => e.to === null).length;
+                const tagNames = tagRows.filter(r => !r.deleted).map(r => r.name);
+                if (new Set(tagNames).size !== tagNames.length
+                    && !confirm('有標籤名稱相同，將合併為同一個標籤，確定嗎？')) return;
+                const delCount = tagRows.filter(r => r.deleted).length;
                 if (delCount && !confirm(`將刪除 ${delCount} 個標籤，並從所有任務移除，確定嗎？`)) return;
 
-                // 2) 分類：與預設相同就不存覆寫
+                // 只在實際內容與目前「生效值」不同時寫入（蓋新 at），避免沒改也把整份 catalog 標成已修改
                 let changed = false;
-                for (const row of catRows) {
-                    const k = row.dataset.cat, def = CATEGORY_DEFAULTS[k];
-                    const emoji = row.querySelector('.catalog-emoji').value.trim() || def.emoji;
-                    const label = row.querySelector('.catalog-name').value.trim();
-                    if (emoji === CATEGORY_META[k].emoji && label === CATEGORY_META[k].label) continue;
-                    cat.categories[k] = { emoji, label, at: now };
+                const put = (store, key, effective, val) => {
+                    if (Object.keys(val).every(f => effective[f] === val[f])) return;
+                    store[key] = { ...(store[key] || {}), ...val, at: now };
                     changed = true;
-                }
+                };
+
+                // 2) 分類
+                const catKeys = Object.keys(CATEGORY_META);
+                cats.forEach((r, i) => {
+                    const key = r.isNew ? `c_${genId()}` : r.key;
+                    const cur = CATEGORY_META[key];
+                    const effective = cur
+                        ? { emoji: cur.emoji, label: cur.label, color: cur.color, order: cat.categories[key]?.order ?? catKeys.indexOf(key) }
+                        : {};
+                    put(cat.categories, key, effective, { emoji: r.emoji || (cur ? cur.emoji : '📁'), label: r.name, color: r.color || '#94a3b8', order: i });
+                });
                 applyCategoryCatalog(cat);
 
-                // 3) 群組：改 catalog 並同步每個任務的 groupName（groupId 不變，篩選與排程不受影響）
-                let touched = 0;
-                for (const row of groupRows) {
-                    const id = row.dataset.group, name = row.querySelector('.catalog-name').value.trim();
-                    if (name === this.groupDisplayName(id)) continue;
-                    cat.groups[id] = { name, at: now };
-                    changed = true;
-                }
+                // 3) 群組：groupId 不變，名稱改動由 applyCatalogToTasks 套到每個任務的 groupName
+                const groupIds = this.allGroupIds();
+                groups.forEach((r, i) => {
+                    const key = r.isNew ? `grp_${genId()}` : r.key;
+                    const effective = r.isNew ? {} : {
+                        name: this.groupDisplayName(key), emoji: this.groupEmoji(key),
+                        order: cat.groups[key]?.order ?? groupIds.indexOf(key)
+                    };
+                    put(cat.groups, key, effective, { name: r.name, emoji: r.emoji || '🔁', order: i });
+                });
 
-                // 4) 標籤：記錄改名/刪除，套用到標籤清單與所有任務
-                const renamedAway = new Set(tagEdits.filter(e => e.to !== e.from).map(e => e.from));
-                for (const e of tagEdits) {
+                // 4) 標籤：改名/刪除紀錄 → 新增 → emoji 與順序（依最終名稱記錄）
+                const edits = tagRows.filter(r => !r.isNew).map(r => ({ from: r.key, to: r.deleted ? null : r.name }));
+                const renamedAway = new Set(edits.filter(e => e.to !== e.from).map(e => e.from));
+                for (const e of edits) {
                     if (e.to === e.from) continue;
                     cat.tagRenames[e.from] = { to: e.to, at: now };
                     changed = true;
                 }
-                for (const e of tagEdits) {   // 新名稱目前有效（蓋掉它過去可能有的改名/刪除紀錄）
-                    if (e.to !== e.from && e.to !== null && !renamedAway.has(e.to)) cat.tagRenames[e.to] = { to: e.to, at: now };
+                const liveNames = [...edits.filter(e => e.to !== e.from && e.to !== null).map(e => e.to),
+                                   ...tagRows.filter(r => r.isNew).map(r => r.name)];
+                for (const name of liveNames) {   // 新名稱目前有效（蓋掉它過去可能有的改名/刪除紀錄）
+                    if (!renamedAway.has(name) && (cat.tagRenames[name] || edits.some(e => e.to === name && e.from !== name))) {
+                        cat.tagRenames[name] = { to: name, at: now };
+                    }
                 }
+                this.tags = applyTagRenames(this.tags, cat.tagRenames);
+                for (const r of tagRows) {
+                    if (r.isNew && !this.tags.includes(r.name)) { this.tags.push(r.name); changed = true; }
+                }
+                const sorted = this.sortedTags();
+                const seenTag = new Set();
+                let ti = 0;
+                for (const r of tagRows) {
+                    if (r.deleted || seenTag.has(r.name)) continue;
+                    seenTag.add(r.name);
+                    const m = cat.tagMeta[r.name] || {};
+                    const effective = { emoji: m.emoji || '', order: m.order ?? (sorted.indexOf(r.name) === -1 ? undefined : sorted.indexOf(r.name)) };
+                    put(cat.tagMeta, r.name, effective, { emoji: r.emoji, order: ti++ });
+                }
+
                 if (!changed) { closeModal('catalogModal'); return; }
 
-                this.tags = applyTagRenames(this.tags, cat.tagRenames);
                 const before = this.tasks;
                 this.tasks = applyCatalogToTasks(this.tasks, cat);
+                let touched = 0;
                 this.tasks.forEach((t, i) => { if (t !== before[i]) touched++; });
                 // 目前篩選若指向被改名/刪除的標籤，跟著更新
-                const ft = this._filterValue('tag');
-                if (ft !== null) {
-                    const r = resolveTagName(ft, cat.tagRenames);
-                    this.currentFilter = r === null ? 'all' : `tag:${r}`;
+                if (this.tagFilter.length) {
+                    this.tagFilter = applyTagRenames(this.tagFilter, cat.tagRenames);
+                    if (!this.tagFilter.length && this.currentFilter === 'tags') this.currentFilter = 'all';
                 }
+                if (this._filterValue('category') !== null && !CATEGORY_META[this._filterValue('category')]) this.currentFilter = 'all';
 
                 this.saveToStorage();
                 closeModal('catalogModal');
-                this.renderCategories();
                 this.updateUI();
-                this.showNotification(`✅ 名稱已更新${touched ? `，套用到 ${touched} 個任務` : ''}`);
+                this.showNotification(`✅ 已更新${touched ? `，套用到 ${touched} 個任務` : ''}`);
             }
 
             // ===== 過濾和排序 =====
@@ -3450,10 +3593,10 @@
                 let filtered = this.tasks.filter(t => !isSubtask(t));
 
                 const category = this._filterValue('category');
-                const tag = this._filterValue('tag');
+                const tagSet = this.currentFilter === 'tags' ? this.tagFilter : null;
                 const groupId = this._filterValue('group');
                 if (category !== null) filtered = filtered.filter(t => t.category === category);
-                else if (tag !== null) filtered = filtered.filter(t => t.tags && t.tags.includes(tag));
+                else if (tagSet) filtered = filtered.filter(t => Array.isArray(t.tags) && tagSet.every(g => t.tags.includes(g)));   // 標籤複選：AND
                 else if (groupId !== null) filtered = filtered.filter(t => t.groupId === groupId);
 
                 // 暫存任務只在「所有任務」首頁的暫存區出現，不進任何分類/標籤/群組篩選
@@ -3524,16 +3667,28 @@
                 const tagContainer = document.getElementById('tagContainer');
                 tagContainer.innerHTML = '';
 
-                this.tags.forEach(tag => {
+                const tags = this.sortedTags();
+                const multi = this.currentFilter === 'tags';
+                if (!tags.length) tagContainer.innerHTML = '<div class="catalog-empty">（尚無標籤，按 ＋ 新增）</div>';
+                tags.forEach(tag => {
                     const tagEl = document.createElement('button');
                     tagEl.className = 'tag-item';
-                    if (this.currentFilter === `tag:${tag}`) {
+                    if (multi && this.tagFilter.includes(tag)) {
                         tagEl.classList.add('active');
                     }
-                    tagEl.textContent = tag;
+                    tagEl.textContent = this.tagText(tag);
+                    // 複選：點擊加入/移出已選標籤，任務須同時含所有已選標籤（AND）；全部取消就回到所有任務
                     tagEl.onclick = (e) => {
                         e.preventDefault();
-                        this.currentFilter = this.currentFilter === `tag:${tag}` ? 'all' : `tag:${tag}`;
+                        const cur = this.currentFilter === 'tags' ? this.tagFilter : [];
+                        this.tagFilter = cur.includes(tag) ? cur.filter(g => g !== tag) : [...cur, tag];
+                        if (this.tagFilter.length) {
+                            this.currentFilter = 'tags';
+                            document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
+                        } else {
+                            this.currentFilter = 'all';
+                            document.querySelector('.filter-item[data-filter="all"]')?.classList.add('active');
+                        }
                         this.renderTags();
                         this.renderTasks();
                     };
@@ -3544,7 +3699,7 @@
                 const tagCheckboxes = document.getElementById('tagCheckboxes');
                 tagCheckboxes.innerHTML = '';
 
-                this.tags.forEach(tag => {
+                tags.forEach(tag => {
                     const label = document.createElement('label');
                     label.className = 'checkbox-item';
 
@@ -3558,7 +3713,7 @@
                     }
 
                     label.appendChild(input);
-                    label.appendChild(document.createTextNode(tag));
+                    label.appendChild(document.createTextNode(this.tagText(tag)));
                     tagCheckboxes.appendChild(label);
                 });
                 this.updateTagSummary();
@@ -3580,7 +3735,8 @@
 
                 if (filtered.length === 0) {
                     taskList.innerHTML = '';
-                    emptyState.querySelector('.empty-state-text').textContent = query ? `找不到名稱或備註含「${query}」的任務` : '沒有任務';
+                    emptyState.querySelector('.empty-state-text').textContent = query ? `找不到名稱或備註含「${query}」的任務`
+                        : this.currentFilter === 'tags' ? `沒有同時含 ${this.tagFilter.map(g => '#' + g).join('、')} 的任務` : '沒有任務';
                     emptyState.style.display = 'flex';
                     return;
                 }
@@ -3805,12 +3961,12 @@
                             ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
                             <span class="task-title">${escapeHtml(task.title)}</span>
                             <div class="task-badges">
-                                <span class="task-category ${task.category}">
+                                <span class="task-category ${task.category}" style="${categoryStyle(task.category)}">
                                     ${escapeHtml(categoryText(task.category))}
                                 </span>
                                 ${task.tags && task.tags.length > 0 ? `
                                     <div class="task-tags">
-                                        ${task.tags.map(tag => `<span class="task-tag">${escapeHtml(tag)}</span>`).join('')}
+                                        ${task.tags.map(tag => `<span class="task-tag">${escapeHtml(this.tagText(tag))}</span>`).join('')}
                                     </div>
                                 ` : ''}
                             </div>
@@ -4412,29 +4568,15 @@
                     });
                 });
 
-                // 編輯分類／群組／標籤
-                document.getElementById('catalogEditBtn').addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    this.openCatalogModal();
+                // 側欄「分類／我的標籤／迴圈群組」標題右側的 ✏️（編輯）與 ＋（新增），皆開啟編輯視窗的對應段落
+                document.querySelectorAll('.section-icon-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (btn.dataset.add) this.openCatalogModal(btn.dataset.add, true);
+                        else this.openCatalogModal(btn.dataset.edit);
+                    });
                 });
                 document.getElementById('catalogSaveBtn').addEventListener('click', () => this.saveCatalogModal());
-
-                // 新增標籤
-                document.getElementById('addTagBtn').addEventListener('click', () => {
-                    this.openModal('tagModal');
-                });
-
-                document.getElementById('tagForm').addEventListener('submit', (e) => {
-                    e.preventDefault();
-                    const tagName = document.getElementById('tagName').value.trim();
-                    if (tagName) {
-                        this.addTag(tagName);
-                        this.renderTags();
-                        document.getElementById('tagForm').reset();
-                        closeModal('tagModal');
-                        this.showNotification(`✅ 添加標籤：${tagName}`);
-                    }
-                });
 
                 // 統一 dragover 監聽器（只綁定一次，委派處理所有視圖的拖曳重定位）
                 const taskListEl = document.getElementById('taskList');
@@ -4683,20 +4825,15 @@
                 const newGroupNameGroup = document.getElementById('newGroupNameGroup');
                 const groupOrderDisplay = document.getElementById('groupOrderDisplay');
 
-                // 收集所有現有群組
-                const groups = new Set();
-                this.tasks.forEach(task => {
-                    if (task.groupId) {
-                        groups.add(task.groupId);
-                    }
-                });
+                // 所有現有群組（含編輯視窗新增、尚無任務的群組），依自訂順序
+                const groups = this.allGroupIds();
 
                 // 更新選項
                 groupSelect.innerHTML = '<option value="">-- 建立新群組 --</option>';
                 groups.forEach(group => {
                     const option = document.createElement('option');
                     option.value = group;
-                    option.textContent = this.groupDisplayName(group);
+                    option.textContent = `${this.groupEmoji(group)} ${this.groupDisplayName(group)}`;
                     if (group === currentGroupId) {
                         option.selected = true;
                     }
@@ -5129,6 +5266,8 @@
                 document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.currentFilter = filterValue;
+                this.tagFilter = [];   // 切到其他視圖時清除標籤複選
+                this.renderTags();
                 this.renderTasks();
             }
 
@@ -5534,11 +5673,12 @@
                     '- dateMode：有明確日期或相對日期（今天、明天、週五、3天後…）→ "scheduled" 並填 date（YYYY-MM-DD）；說「之後再排」或完全沒提到時間 → "unscheduled"（暫存區），date 為 null；說「沒有期限、長期、有空再做」→ "unlimited"，date 為 null。「週五前」這類期限，date 填該日。',
                     '- time：有提到具體時刻才填 HH:MM（24 小時制，下午3點 → 15:00；早上沒說幾點不要猜），否則 null。只有 scheduled 才可填。',
                     '- estimatedTime：10 分鐘以內的小事 → "10min"；約 30 分鐘 → "30min"；超過 30 分鐘 → "30plus" 並填 blocks＝所需分鐘數 ÷ 30 無條件進位（至少 2，例：兩小時 → 4）；零碎、分次進行、無法估計連續時間 → "non-continuous"。沒提時長就依常識估計。非 30plus 時 blocks 為 null。',
-                    '- category（只能四選一）：',
+                    '- category（只能從以下選一個 key）：',
                     `  - "career" ${categoryText('career')}（預設：事業）：工作、上課、讀書、考試、作業、報告、研究、學習技能、求職。凡是學業相關都屬此類。`,
                     `  - "life" ${categoryText('life')}（預設：生活必須）：家事、打掃、採買、煮飯、繳費、看醫生、牙醫、辦手續、搬家、照顧家人、雜事。`,
                     `  - "recharge" ${categoryText('recharge')}（預設：充電活動）：運動、健身、跑步、休閒娛樂、興趣、閱讀課外書、看電影、旅遊、和朋友聚會、放鬆。`,
                     `  - "review" ${categoryText('review')}（預設：復盤）：回顧、反思、寫日記、週記、月整理、檢討、規劃下週。`,
+                    ...Object.keys(CATEGORY_META).filter(k => !CATEGORY_DEFAULTS[k]).map(k => `  - "${k}" ${categoryText(k)}：使用者自訂的分類，依名稱判斷是否適用。`),
                     '- taskType：預設 "goal"（做完就好的事）；明確是「做越多越好、累積時數」的練習（例：練琴、背單字累積）→ "accumulative"；提前完成未來才需要做的事 → "ahead"。拿不準就用 "goal"。',
                     `- tags：只能從既有標籤中挑選完全相符的名稱：${tags}。沒有適合的就空陣列，不要自創標籤。`,
                     '- 重複性任務（每天、每3天、每週…）：recurringInterval 填間隔天數（每天 1、每週 7）；提到次數填 recurringCount；提到結束日期填 recurringUntil（YYYY-MM-DD）；不知道就 null。重複任務必須是 scheduled，沒說從哪天開始就從今天開始。非重複任務這三欄都是 null。',
@@ -6406,16 +6546,7 @@
             }
 
             getGroupsList() {
-                const groups = {};
-                this.tasks.forEach(task => {
-                    if (task.recurring && task.recurring.enabled && task.groupId && !groups[task.groupId]) {
-                        groups[task.groupId] = {
-                            groupId: task.groupId,
-                            name: this.groupDisplayName(task.groupId)
-                        };
-                    }
-                });
-                return Object.values(groups);
+                return this.allGroupIds(true).map(id => ({ groupId: id, name: this.groupDisplayName(id), emoji: this.groupEmoji(id) }));
             }
 
             updateGroupTaskDates(groupId, anchorTaskId = null) {
@@ -6484,12 +6615,12 @@
                 const filterList = container.querySelector('.filter-list');
                 filterList.innerHTML = '';
 
+                // 區塊永遠顯示（標題右側有 ✏️＋），沒有群組時顯示提示
                 const groups = this.getGroupsList();
                 if (groups.length === 0) {
-                    container.style.display = 'none';
+                    filterList.innerHTML = '<div class="catalog-empty">（尚無群組，按 ＋ 新增）</div>';
                     return;
                 }
-                container.style.display = '';
 
                 groups.forEach(group => {
                     const btn = document.createElement('button');
@@ -6497,9 +6628,9 @@
                     if (this.currentFilter === `group:${group.groupId}`) {
                         btn.classList.add('active');
                     }
-                    btn.innerHTML = `<span class="filter-icon">🔁</span>${escapeHtml(group.name)}`;
+                    btn.innerHTML = `<span class="filter-icon">${escapeHtml(group.emoji)}</span>${escapeHtml(group.name)}`;
                     btn.dataset.filter = `group:${group.groupId}`;
-                    btn.onclick = () => this.selectFilterButton(btn, `group:${group.groupId}`);
+                    btn.onclick = () => this._pickFilter(btn, `group:${group.groupId}`);
                     filterList.appendChild(btn);
                 });
             }
