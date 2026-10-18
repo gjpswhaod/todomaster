@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.6.2 - 任務管理工具</title>
+    <title>TodoMaster v6.6.3 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -1183,7 +1183,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.6.2';
+        const APP_VERSION = 'v6.6.3';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1382,7 +1382,7 @@
 
             <div class="sidebar-section" id="groupContainer">
                 <div class="sidebar-section-title section-title-row"><span>迴圈群組</span><span class="section-actions"><button type="button" class="section-icon-btn" data-add="groups" title="新增群組">＋</button></span></div>
-                <div class="filter-list"></div>
+                <div class="tag-container" id="groupFilterList"></div>
             </div>
 
             <div class="sidebar-section">
@@ -6619,25 +6619,32 @@
                 const container = document.getElementById('groupContainer');
                 if (!container) return;
 
-                const filterList = container.querySelector('.filter-list');
+                const filterList = document.getElementById('groupFilterList');
                 filterList.innerHTML = '';
 
-                // 區塊永遠顯示（標題右側有 ✏️＋），沒有群組時顯示提示
+                // 區塊永遠顯示（標題右側有 ＋），沒有群組時顯示提示
                 const groups = this.getGroupsList();
                 if (groups.length === 0) {
                     filterList.innerHTML = '<div class="catalog-empty">（尚無群組，按 ＋ 新增）</div>';
                     return;
                 }
 
+                // 與分類、標籤相同的並排小方塊（沿用 cat-chip 的選取狀態處理）；再點一次回到所有任務
                 groups.forEach(group => {
+                    const f = `group:${group.groupId}`;
                     const btn = document.createElement('button');
-                    btn.className = 'filter-item';
-                    if (this.currentFilter === `group:${group.groupId}`) {
-                        btn.classList.add('active');
-                    }
-                    btn.innerHTML = `<span class="filter-icon">${escapeHtml(group.emoji)}</span>${escapeHtml(group.name)}`;
-                    btn.dataset.filter = `group:${group.groupId}`;
-                    btn.onclick = () => this._pickFilter(btn, `group:${group.groupId}`);
+                    btn.className = 'tag-item cat-chip';
+                    if (this.currentFilter === f) btn.classList.add('active');
+                    btn.textContent = `${group.emoji} ${group.name}`;
+                    btn.dataset.filter = f;
+                    btn.onclick = (e) => {
+                        e.preventDefault();
+                        if (this.currentFilter === f) {
+                            const allBtn = document.querySelector('.filter-item[data-filter="all"]');
+                            if (allBtn) { this._pickFilter(allBtn, 'all'); return; }
+                        }
+                        this._pickFilter(btn, f);
+                    };
                     filterList.appendChild(btn);
                 });
             }
