@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.6.1 - 任務管理工具</title>
+    <title>TodoMaster v6.6.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -1183,7 +1183,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.6.1';
+        const APP_VERSION = 'v6.6.2';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1371,17 +1371,17 @@
             </div>
 
             <div class="sidebar-section">
-                <div class="sidebar-section-title section-title-row"><span>分類</span><span class="section-actions"><button type="button" class="section-icon-btn" data-edit="categories" title="編輯分類">✏️</button><button type="button" class="section-icon-btn" data-add="categories" title="新增分類">＋</button></span></div>
-                <div class="filter-list" id="categoryFilterList"></div>
+                <div class="sidebar-section-title section-title-row"><span>分類</span><span class="section-actions"><button type="button" class="section-icon-btn" data-add="categories" title="新增分類">＋</button></span></div>
+                <div class="tag-container" id="categoryFilterList"></div>
             </div>
 
             <div class="sidebar-section">
-                <div class="sidebar-section-title section-title-row"><span>我的標籤</span><span class="section-actions"><button type="button" class="section-icon-btn" data-edit="tags" title="編輯標籤">✏️</button><button type="button" class="section-icon-btn" data-add="tags" title="新增標籤">＋</button></span></div>
+                <div class="sidebar-section-title section-title-row"><span>我的標籤</span><span class="section-actions"><button type="button" class="section-icon-btn" data-add="tags" title="新增標籤">＋</button></span></div>
                 <div class="tag-container" id="tagContainer"></div>
             </div>
 
             <div class="sidebar-section" id="groupContainer">
-                <div class="sidebar-section-title section-title-row"><span>迴圈群組</span><span class="section-actions"><button type="button" class="section-icon-btn" data-edit="groups" title="編輯群組">✏️</button><button type="button" class="section-icon-btn" data-add="groups" title="新增群組">＋</button></span></div>
+                <div class="sidebar-section-title section-title-row"><span>迴圈群組</span><span class="section-actions"><button type="button" class="section-icon-btn" data-add="groups" title="新增群組">＋</button></span></div>
                 <div class="filter-list"></div>
             </div>
 
@@ -3338,18 +3338,25 @@
                 if (window.innerWidth <= 768) this.closeSidebarOverlay();
             }
 
-            // 側欄分類按鈕（依 CATEGORY_META 順序動態產生）與表單分類下拉
+            // 側欄分類按鈕（依 CATEGORY_META 順序動態產生，與標籤相同的並排小方塊；再點一次回到所有任務）與表單分類下拉
             renderCategories() {
                 const list = document.getElementById('categoryFilterList');
                 list.innerHTML = '';
                 Object.keys(CATEGORY_META).forEach(k => {
                     const f = `category:${k}`;
                     const btn = document.createElement('button');
-                    btn.className = 'filter-item';
+                    btn.className = 'tag-item cat-chip';
                     if (this.currentFilter === f) btn.classList.add('active');
                     btn.dataset.filter = f;
-                    btn.innerHTML = `<span class="filter-icon">${escapeHtml(CATEGORY_META[k].emoji)}</span>${escapeHtml(CATEGORY_META[k].label)}`;
-                    btn.onclick = () => this._pickFilter(btn, f);
+                    btn.textContent = categoryText(k);
+                    btn.onclick = (e) => {
+                        e.preventDefault();
+                        if (this.currentFilter === f) {
+                            const allBtn = document.querySelector('.filter-item[data-filter="all"]');
+                            if (allBtn) { this._pickFilter(allBtn, 'all'); return; }
+                        }
+                        this._pickFilter(btn, f);
+                    };
                     list.appendChild(btn);
                 });
                 const sel = document.getElementById('category');
@@ -3684,7 +3691,7 @@
                         this.tagFilter = cur.includes(tag) ? cur.filter(g => g !== tag) : [...cur, tag];
                         if (this.tagFilter.length) {
                             this.currentFilter = 'tags';
-                            document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
+                            document.querySelectorAll('.filter-item, .cat-chip').forEach(b => b.classList.remove('active'));
                         } else {
                             this.currentFilter = 'all';
                             document.querySelector('.filter-item[data-filter="all"]')?.classList.add('active');
@@ -5263,7 +5270,7 @@
             }
 
             selectFilterButton(btn, filterValue) {
-                document.querySelectorAll('.filter-item').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.filter-item, .cat-chip').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 this.currentFilter = filterValue;
                 this.tagFilter = [];   // 切到其他視圖時清除標籤複選
