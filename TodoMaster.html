@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.5.8 - 任務管理工具</title>
+    <title>TodoMaster v6.6.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -603,6 +603,18 @@
             color: var(--category-review);
         }
 
+        /* 編輯分類／群組／標籤 */
+        .catalog-section-title { font-weight: 600; margin: 14px 0 6px; color: var(--text-secondary); font-size: 0.9em; }
+        .catalog-section-title:first-child { margin-top: 0; }
+        .catalog-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+        .catalog-row input { padding: 6px 8px; border: 1px solid var(--bg-tertiary); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); font-size: 14px; }
+        .catalog-row .catalog-emoji { width: 3.2em; text-align: center; flex: none; }
+        .catalog-row .catalog-name { flex: 1; min-width: 0; }
+        .catalog-emoji-static { width: 3.2em; text-align: center; flex: none; }
+        .catalog-row.catalog-deleted .catalog-name { text-decoration: line-through; opacity: 0.5; }
+        .catalog-empty { color: var(--text-secondary); font-size: 0.85em; margin-bottom: 6px; }
+        #catalogBody { max-height: 60vh; overflow-y: auto; }
+
         .task-meta {
             display: flex;
             gap: 12px;
@@ -1161,15 +1173,28 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.5.8';
+        const APP_VERSION = 'v6.6.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
-        const CATEGORY_META = {
+        // 分類固定 4 個 key（顏色綁 key）；名稱與 emoji 可由使用者自訂（catalog.categories），applyCategoryCatalog() 覆寫進 CATEGORY_META
+        const CATEGORY_DEFAULTS = {
             career: { emoji: '💼', label: '事業' },
-            recharge: { emoji: '⚡', label: '充電' },
-            life: { emoji: '🏠', label: '生活' },
+            recharge: { emoji: '⚡', label: '充電活動' },
+            life: { emoji: '🏠', label: '生活必須' },
             review: { emoji: '🔍', label: '復盤' }
         };
+        const CATEGORY_META = Object.fromEntries(Object.entries(CATEGORY_DEFAULTS).map(([k, v]) => [k, { ...v }]));
+        function applyCategoryCatalog(catalog) {
+            const over = (catalog && catalog.categories) || {};
+            for (const [k, def] of Object.entries(CATEGORY_DEFAULTS)) {
+                const o = over[k] || {};
+                CATEGORY_META[k] = { emoji: o.emoji || def.emoji, label: o.label || def.label };
+            }
+        }
+        function categoryText(key) {
+            const m = CATEGORY_META[key];
+            return m ? `${m.emoji} ${m.label}` : String(key || '');
+        }
         const TIME_META = {
             '10min': { emoji: '⏱️', label: '10分鐘' },
             '30min': { emoji: '⏲️', label: '30分鐘' },
@@ -1321,22 +1346,22 @@
             </div>
 
             <div class="sidebar-section">
-                <div class="sidebar-section-title">分類</div>
+                <div class="sidebar-section-title" style="display:flex;align-items:center;justify-content:space-between;">分類<button type="button" class="btn btn-secondary btn-small" id="catalogEditBtn" title="編輯分類／群組／標籤名稱">✏️ 編輯</button></div>
                 <button class="filter-item" data-filter="category:career">
-                    <span class="filter-icon">💼</span>
-                    事業
+                    <span class="filter-icon" data-cat-emoji="career">💼</span>
+                    <span data-cat-label="career">事業</span>
                 </button>
                 <button class="filter-item" data-filter="category:recharge">
-                    <span class="filter-icon">⚡</span>
-                    充電活動
+                    <span class="filter-icon" data-cat-emoji="recharge">⚡</span>
+                    <span data-cat-label="recharge">充電活動</span>
                 </button>
                 <button class="filter-item" data-filter="category:life">
-                    <span class="filter-icon">🏠</span>
-                    生活必須
+                    <span class="filter-icon" data-cat-emoji="life">🏠</span>
+                    <span data-cat-label="life">生活必須</span>
                 </button>
                 <button class="filter-item" data-filter="category:review">
-                    <span class="filter-icon">🔍</span>
-                    復盤
+                    <span class="filter-icon" data-cat-emoji="review">🔍</span>
+                    <span data-cat-label="review">復盤</span>
                 </button>
             </div>
 
@@ -1384,7 +1409,7 @@
                     <span id="versionDisplay" style="font-size: 0.75rem; color: var(--text-secondary); opacity: 0.6; margin-left: 8px; font-family: monospace;"></span>
                 </div>
                 <div class="task-search">
-                    <input type="search" id="taskSearchInput" placeholder="🔍 搜尋任務名稱…" aria-label="搜尋任務名稱" autocomplete="off">
+                    <input type="search" id="taskSearchInput" placeholder="🔍 搜尋任務名稱或備註…" aria-label="搜尋任務名稱或備註" autocomplete="off">
                     <button type="button" class="task-search-clear" id="taskSearchClear" title="清除搜尋" aria-label="清除搜尋" hidden>✕</button>
                 </div>
                 <div class="top-bar-right">
@@ -1516,6 +1541,14 @@
                     </div>
 
                     <div class="form-group">
+                        <label>下次日期計算方式</label>
+                        <select id="recurringMode" class="form-select">
+                            <option value="fixed" selected>依原定排程（這次延後或重新安排都不影響下次日期；群組：逾期重排不影響後續任務）</option>
+                            <option value="auto">依完成日順延（下次 = 完成日 + 間隔；群組：後續任務一併順延）</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
                         <div class="recurring-end-row">
                             <div class="recurring-end-col">
                                 <label>結束日期（選填）</label>
@@ -1558,13 +1591,6 @@
                     </select>
                         </div>
                         <div class="form-group">
-                            <label>延後設定方式</label>
-                            <select id="groupDelayMode" class="form-select">
-                        <option value="fixed" selected>固定日期（逾期重新安排到今天不影響後續任務，僅拖曳排序時重算）</option>
-                        <option value="auto">自動延後（逾期重新安排到今天後，後續任務日期一併重新計算）</option>
-                    </select>
-                        </div>
-                        <div class="form-group">
                             <label>此群組內順序</label>
                             <div id="groupOrderDisplay" style="padding: 10px; background-color: var(--bg-tertiary); border-radius: 6px; color: var(--text-secondary);"></div>
                         </div>
@@ -1598,6 +1624,18 @@
                     </button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- 編輯分類／群組／標籤模態框（v6.6.0） -->
+    <div class="modal" id="catalogModal">
+        <div class="modal-content">
+            <div class="modal-header">編輯分類／群組／標籤</div>
+            <div id="catalogBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="closeModal('catalogModal')">取消</button>
+                <button type="button" class="btn btn-primary" id="catalogSaveBtn">儲存</button>
+            </div>
         </div>
     </div>
 
@@ -1872,7 +1910,7 @@
         // 資料主體仍是 localStorage；GitHub 私有 repo 內的 state.json 只是各裝置合併後的共同狀態。
 
         // SYNC-CORE-BEGIN
-        const SYNC_SCHEMA = 2;                 // state.json 資料版本（1 = v6.2 以前的備份檔：缺 updatedAt / deletedTasks）
+        const SYNC_SCHEMA = 3;                 // state.json 資料版本（1 = v6.2 以前的備份檔：缺 updatedAt / deletedTasks；3 = v6.6.0 起含 catalog）
         const SYNC_TOMBSTONE_DAYS = 30;        // 刪除標記保留天數（與「完成超過 30 天即清除」對齊）
         const SYNC_TOMBSTONE_MS = SYNC_TOMBSTONE_DAYS * 86400000;
         const SYNC_DATA_PATH = 'state.json';
@@ -1938,7 +1976,76 @@
                 t: [...(s.tasks || [])].sort(compareById),
                 g: [...(s.tags || [])].sort(),
                 l: (s.overdueLossLog || []).map(stableStringify).sort(),
-                d: Object.keys(del).sort().map(k => [k, del[k]])
+                d: Object.keys(del).sort().map(k => [k, del[k]]),
+                c: normalizeCatalog(s.catalog)
+            });
+        }
+
+        // ===== 名稱目錄（v6.6.0）：分類名稱/emoji、群組名稱、標籤改名紀錄 =====
+        // catalog = { categories: { key: {emoji, label, at} }, groups: { groupId: {name, at} }, tagRenames: { 舊名: {to: 新名|null, at} } }
+        // 各鍵以 at 較晚者為準；tagRenames 讓另一台裝置帶著舊標籤名合併時也會被改名（to=null 代表已刪除），
+        // to 等於自己代表「此名稱目前有效」（改回舊名或重新新增被刪過的標籤時寫入，用來蓋掉較早的改名/刪除紀錄）
+        const CATALOG_KEYS = ['categories', 'groups', 'tagRenames'];
+        function emptyCatalog() { return { categories: {}, groups: {}, tagRenames: {} }; }
+        function normalizeCatalog(c) {
+            const out = emptyCatalog();
+            if (!c || typeof c !== 'object') return out;
+            for (const k of CATALOG_KEYS) {
+                const src = c[k];
+                if (!src || typeof src !== 'object') continue;
+                for (const [key, v] of Object.entries(src)) {
+                    if (v && typeof v === 'object' && Number.isFinite(v.at)) out[k][key] = v;
+                }
+            }
+            return out;
+        }
+        function mergeCatalog(a, b, now) {
+            const A = normalizeCatalog(a), B = normalizeCatalog(b), out = emptyCatalog();
+            for (const k of CATALOG_KEYS) {
+                for (const src of [A[k], B[k]]) {
+                    for (const [key, v] of Object.entries(src)) {
+                        if (k === 'tagRenames' && now - v.at > SYNC_TOMBSTONE_MS) continue;
+                        if (!out[k][key] || v.at > out[k][key].at) out[k][key] = v;
+                    }
+                }
+            }
+            return out;
+        }
+        // 標籤最新名稱：鏈式套用改名（a→b→c），null = 已刪除；seen 防循環
+        function resolveTagName(tag, renames) {
+            let cur = tag;
+            const seen = new Set();
+            while (renames && Object.prototype.hasOwnProperty.call(renames, cur) && !seen.has(cur)) {
+                seen.add(cur);
+                const to = renames[cur].to;
+                if (to === null || to === undefined) return null;
+                if (to === cur) return cur;
+                cur = to;
+            }
+            return cur;
+        }
+        function applyTagRenames(tags, renames) {
+            const out = [];
+            for (const g of tags || []) {
+                const r = resolveTagName(g, renames);
+                if (r !== null && !out.includes(r)) out.push(r);
+            }
+            return out;
+        }
+        // 把 catalog 套到任務上（標籤改名/刪除、群組名稱）；有變動才換新物件，不動 updatedAt（各裝置算出的結果一致）
+        function applyCatalogToTasks(tasks, catalog) {
+            const renames = catalog.tagRenames, groups = catalog.groups;
+            const hasRenames = Object.keys(renames).length > 0;
+            return tasks.map(t => {
+                let out = t;
+                if (hasRenames && Array.isArray(t.tags) && t.tags.length) {
+                    const nt = applyTagRenames(t.tags, renames);
+                    if (stableStringify(nt) !== stableStringify(t.tags)) out = { ...out, tags: nt };
+                }
+                if (t.groupId && groups[t.groupId] && groups[t.groupId].name && t.groupName !== groups[t.groupId].name) {
+                    out = { ...out, groupName: groups[t.groupId].name };
+                }
+                return out;
             });
         }
 
@@ -1958,6 +2065,14 @@
         // ===== 固定 id（迴圈任務的「下一次」）=====
         // 兩台裝置各自完成同一個迴圈任務時，會算出同一個 id，合併時自然收斂成一份（不再各生一份）。
         // seriesId＝系列的根任務 id（舊任務沒有此欄位，就以自己的 id 當根）；第 n 次的 id 固定為 `${seriesId}~${n}`。
+        // 迴圈「下次日期」模式：'fixed' 依原定排程（基準日 + 間隔）／'auto' 依完成日順延（完成日 + 間隔）。
+        // v6.6.0 前群組存在 groupDelayMode（意義相同），獨立迴圈原本行為最接近 auto
+        function getRecurMode(task) {
+            const m = (task && task.recurring && task.recurring.mode) || (task && task.groupDelayMode);
+            if (m === 'fixed' || m === 'auto') return m;
+            return task && task.groupId ? 'fixed' : 'auto';
+        }
+
         function nextRecurringId(task) {
             const series = task.seriesId || task.id;
             const n = ((task.recurring && task.recurring.completedCount) || 0) + 1;
@@ -2146,9 +2261,12 @@
                 tasks.push(out);
             }
 
-            // 3) 標籤
-            const tags = [...L.tags];
+            // 3) 名稱目錄與標籤（聯集後套用改名/刪除紀錄，避免另一台裝置用舊名把標籤帶回來）
+            const catalog = mergeCatalog(local.catalog, remote.catalog, now);
+            let tags = [...L.tags];
             for (const g of R.tags) if (!tags.includes(g)) tags.push(g);
+            tags = applyTagRenames(tags, catalog.tagRenames);
+            tasks = applyCatalogToTasks(tasks, catalog);
 
             // 4) 逾期損失紀錄
             const keyOf = r => stableStringify([r.date, r.taskId, r.minutes, r.taskTitle]);
@@ -2174,7 +2292,7 @@
                 overdueLossLog = overdueLossLog.filter(rec => rec.date >= opts.purgeCutoff);
             }
 
-            return { tasks, tags, overdueLossLog, deletedTasks: deleted };
+            return { tasks, tags, overdueLossLog, deletedTasks: deleted, catalog };
         }
 
         // 驗證並正規化外部資料（遠端 state.json 或使用者匯入的備份檔）；舊版備份（無 schema）視為 v1
@@ -2193,7 +2311,8 @@
                 tasks: raw.tasks.filter(t => t && typeof t === 'object' && t.id !== undefined && t.id !== null),
                 tags: Array.isArray(raw.tags) ? raw.tags.filter(g => typeof g === 'string') : [],
                 overdueLossLog: Array.isArray(raw.overdueLossLog) ? raw.overdueLossLog.filter(r => r && typeof r === 'object') : [],
-                deletedTasks
+                deletedTasks,
+                catalog: normalizeCatalog(raw.catalog)
             };
         }
 
@@ -2527,7 +2646,8 @@
                     tasks: [...state.tasks].sort(compareById),   // 依 id 排序：讓 git 歷史的 diff 穩定易讀
                     tags: state.tags,
                     overdueLossLog: state.overdueLossLog,
-                    deletedTasks: state.deletedTasks
+                    deletedTasks: state.deletedTasks,
+                    catalog: state.catalog || emptyCatalog()
                 }, null, 1);
             }
 
@@ -2762,12 +2882,13 @@
             constructor() {
                 this.tasks = [];
                 this.tags = [];
+                this.catalog = emptyCatalog();   // 分類/群組名稱與標籤改名紀錄（雲端同步）
                 this.overdueLossLog = []; // 逾期任務「重新安排到今天」時記錄的原定日期損失：{ date, minutes, taskId, taskTitle }
                 this.deletedTasks = {};   // 刪除標記 { 任務id: 刪除時間(ms) }，雲端同步用來讓「刪除」也能跨裝置合併
                 this.deviceId = '';       // 本機裝置代號（僅用於 commit 訊息辨識）
                 this.cloud = null;        // 雲端同步引擎（CloudSync）
                 this._fpMap = new Map();  // 任務指紋快照 id → { c: 內容, o: 排序 }，saveToStorage 靠它找出「哪些任務變動了」
-                this._metaFp = '';        // tags + overdueLossLog 的指紋
+                this._metaFp = '';        // tags + overdueLossLog + catalog 的指紋
                 this.currentFilter = 'all';
                 this.sortMode = 'drag'; // 'drag' 或 'fixed'
                 this.showCompleted = true;
@@ -2817,6 +2938,8 @@
                     const showCompletedJson = localStorage.getItem('todoShowCompleted');
                     this.showCompleted = showCompletedJson !== null ? JSON.parse(showCompletedJson) : true;
                     this.deletedTasks = lsReadJson('todoDeletedTasks', {});
+                    this.catalog = normalizeCatalog(lsReadJson('todoCatalog', null));
+                    applyCategoryCatalog(this.catalog);
                 } catch (e) {
                     console.error('載入數據失敗:', e);
                     this.showNotification('⚠️ 載入數據失敗');
@@ -2844,7 +2967,7 @@
             // 不必逐一修改各呼叫點：內容變動 → updatedAt；只有排序欄位變動 → 只蓋 orderAt；消失的 id → 寫入刪除標記。
             _rebuildFingerprints() {
                 this._fpMap = new Map(this.tasks.map(t => [t.id, { c: taskContentFp(t), o: taskOrderFp(t) }]));
-                this._metaFp = stableStringify([this.tags, this.overdueLossLog]);
+                this._metaFp = stableStringify([this.tags, this.overdueLossLog, this.catalog]);
             }
 
             // 回傳「需要同步的資料」是否有變動（個人偏好如排序模式不算）
@@ -2881,7 +3004,7 @@
                 for (const id of Object.keys(this.deletedTasks)) {
                     if (now - this.deletedTasks[id] > SYNC_TOMBSTONE_MS) delete this.deletedTasks[id];
                 }
-                const metaFp = stableStringify([this.tags, this.overdueLossLog]);
+                const metaFp = stableStringify([this.tags, this.overdueLossLog, this.catalog]);
                 if (metaFp !== this._metaFp) {
                     this._metaFp = metaFp;
                     changed = true;
@@ -2894,6 +3017,7 @@
                 localStorage.setItem('todoTags', JSON.stringify(this.tags));
                 localStorage.setItem('todoOverdueLossLog', JSON.stringify(this.overdueLossLog));
                 localStorage.setItem('todoDeletedTasks', JSON.stringify(this.deletedTasks));
+                localStorage.setItem('todoCatalog', JSON.stringify(this.catalog));
                 localStorage.setItem('todoSortMode', JSON.stringify(this.sortMode));
                 localStorage.setItem('todoShowCompleted', JSON.stringify(this.showCompleted));
             }
@@ -2911,7 +3035,7 @@
 
             // ===== 雲端同步 / 備份檔所需的狀態存取 =====
             _exportState() {
-                return { tasks: this.tasks, tags: this.tags, overdueLossLog: this.overdueLossLog, deletedTasks: this.deletedTasks };
+                return { tasks: this.tasks, tags: this.tags, overdueLossLog: this.overdueLossLog, deletedTasks: this.deletedTasks, catalog: this.catalog };
             }
 
             // 套用合併後的狀態：整份取代、重建指紋（不會被當成「使用者修改」而重新蓋時間戳）、寫入 localStorage、更新畫面
@@ -2920,6 +3044,8 @@
                 this.tags = state.tags;
                 this.overdueLossLog = state.overdueLossLog;
                 this.deletedTasks = state.deletedTasks;
+                this.catalog = normalizeCatalog(state.catalog);
+                applyCategoryCatalog(this.catalog);
                 this._rebuildFingerprints();
                 try {
                     this._persist();
@@ -3171,8 +3297,147 @@
             addTag(name) {
                 if (!this.tags.includes(name)) {
                     this.tags.push(name);
+                    // 這個名稱若曾被改名/刪除，寫入「目前有效」紀錄，避免同步時又被套用舊紀錄移除
+                    if (this.catalog.tagRenames[name]) this.catalog.tagRenames[name] = { to: name, at: this._now() };
                     this.saveToStorage();
                 }
+            }
+
+            _now() { return this.cloud ? this.cloud.now() : Date.now(); }
+
+            // ===== 名稱目錄：分類／群組／標籤統一編輯（v6.6.0）=====
+            groupDisplayName(groupId) {
+                const g = this.catalog.groups[groupId];
+                if (g && g.name) return g.name;
+                const t = this.tasks.find(x => x.groupId === groupId && x.groupName);
+                return t ? t.groupName : String(groupId);
+            }
+
+            // 側欄分類按鈕與表單分類下拉依 CATEGORY_META 更新文字（按鈕本身是靜態的，點擊綁定不變）
+            renderCategories() {
+                document.querySelectorAll('[data-cat-emoji]').forEach(el => { el.textContent = CATEGORY_META[el.dataset.catEmoji]?.emoji || ''; });
+                document.querySelectorAll('[data-cat-label]').forEach(el => { el.textContent = CATEGORY_META[el.dataset.catLabel]?.label || ''; });
+                const sel = document.getElementById('category');
+                const cur = sel.value || 'career';
+                sel.innerHTML = Object.keys(CATEGORY_META).map(k => `<option value="${k}">${escapeHtml(categoryText(k))}</option>`).join('');
+                sel.value = cur;
+            }
+
+            // 開啟「編輯分類／群組／標籤」視窗
+            openCatalogModal() {
+                const catRows = Object.keys(CATEGORY_DEFAULTS).map(k => `
+                    <div class="catalog-row" data-cat="${k}">
+                        <input type="text" class="catalog-emoji" maxlength="4" value="${escapeHtml(CATEGORY_META[k].emoji)}" aria-label="圖示">
+                        <input type="text" class="catalog-name" maxlength="20" value="${escapeHtml(CATEGORY_META[k].label)}" aria-label="名稱">
+                        <button type="button" class="btn btn-secondary btn-small catalog-reset" title="恢復預設：${escapeHtml(CATEGORY_DEFAULTS[k].emoji + ' ' + CATEGORY_DEFAULTS[k].label)}">↺</button>
+                    </div>`).join('');
+                const groupIds = [...new Set(this.tasks.filter(t => t.groupId).map(t => t.groupId))];
+                const groupRows = groupIds.length ? groupIds.map(id => `
+                    <div class="catalog-row" data-group="${escapeHtml(id)}">
+                        <span class="catalog-emoji-static">🔁</span>
+                        <input type="text" class="catalog-name" maxlength="40" value="${escapeHtml(this.groupDisplayName(id))}" aria-label="群組名稱">
+                    </div>`).join('') : '<div class="catalog-empty">（目前沒有群組）</div>';
+                const tagRows = this.tags.length ? this.tags.map(tag => `
+                    <div class="catalog-row" data-tag="${escapeHtml(tag)}">
+                        <span class="catalog-emoji-static">🏷️</span>
+                        <input type="text" class="catalog-name" maxlength="40" value="${escapeHtml(tag)}" aria-label="標籤名稱">
+                        <button type="button" class="btn btn-danger btn-small catalog-del" title="刪除標籤（從所有任務移除）">🗑️</button>
+                    </div>`).join('') : '<div class="catalog-empty">（目前沒有標籤）</div>';
+
+                const body = document.getElementById('catalogBody');
+                body.innerHTML = `
+                    <div class="catalog-section-title">分類（名稱與圖示）</div>${catRows}
+                    <div class="catalog-section-title">迴圈群組</div>${groupRows}
+                    <div class="catalog-section-title">標籤</div>${tagRows}`;
+                body.querySelectorAll('.catalog-reset').forEach(btn => btn.onclick = () => {
+                    const row = btn.closest('.catalog-row'), def = CATEGORY_DEFAULTS[row.dataset.cat];
+                    row.querySelector('.catalog-emoji').value = def.emoji;
+                    row.querySelector('.catalog-name').value = def.label;
+                });
+                body.querySelectorAll('.catalog-del').forEach(btn => btn.onclick = () => {
+                    const row = btn.closest('.catalog-row');
+                    const del = row.classList.toggle('catalog-deleted');
+                    row.querySelector('.catalog-name').disabled = del;
+                    btn.textContent = del ? '↩️' : '🗑️';
+                    btn.title = del ? '取消刪除' : '刪除標籤（從所有任務移除）';
+                });
+                this.openModal('catalogModal');
+            }
+
+            saveCatalogModal() {
+                const body = document.getElementById('catalogBody');
+                const now = this._now();
+                const cat = this.catalog;
+
+                // 1) 檢查
+                const catRows = [...body.querySelectorAll('.catalog-row[data-cat]')];
+                for (const row of catRows) {
+                    if (!row.querySelector('.catalog-name').value.trim()) { alert('分類名稱不可空白'); return; }
+                }
+                const groupRows = [...body.querySelectorAll('.catalog-row[data-group]')];
+                for (const row of groupRows) {
+                    if (!row.querySelector('.catalog-name').value.trim()) { alert('群組名稱不可空白'); return; }
+                }
+                const tagEdits = [...body.querySelectorAll('.catalog-row[data-tag]')].map(row => ({
+                    from: row.dataset.tag,
+                    to: row.classList.contains('catalog-deleted') ? null : row.querySelector('.catalog-name').value.trim()
+                }));
+                if (tagEdits.some(e => e.to === '')) { alert('標籤名稱不可空白（要移除請按 🗑️）'); return; }
+                const finalNames = tagEdits.filter(e => e.to !== null).map(e => e.to);
+                if (new Set(finalNames).size !== finalNames.length
+                    && !confirm('有標籤改成相同名稱，將合併為同一個標籤，確定嗎？')) return;
+                const delCount = tagEdits.filter(e => e.to === null).length;
+                if (delCount && !confirm(`將刪除 ${delCount} 個標籤，並從所有任務移除，確定嗎？`)) return;
+
+                // 2) 分類：與預設相同就不存覆寫
+                let changed = false;
+                for (const row of catRows) {
+                    const k = row.dataset.cat, def = CATEGORY_DEFAULTS[k];
+                    const emoji = row.querySelector('.catalog-emoji').value.trim() || def.emoji;
+                    const label = row.querySelector('.catalog-name').value.trim();
+                    if (emoji === CATEGORY_META[k].emoji && label === CATEGORY_META[k].label) continue;
+                    cat.categories[k] = { emoji, label, at: now };
+                    changed = true;
+                }
+                applyCategoryCatalog(cat);
+
+                // 3) 群組：改 catalog 並同步每個任務的 groupName（groupId 不變，篩選與排程不受影響）
+                let touched = 0;
+                for (const row of groupRows) {
+                    const id = row.dataset.group, name = row.querySelector('.catalog-name').value.trim();
+                    if (name === this.groupDisplayName(id)) continue;
+                    cat.groups[id] = { name, at: now };
+                    changed = true;
+                }
+
+                // 4) 標籤：記錄改名/刪除，套用到標籤清單與所有任務
+                const renamedAway = new Set(tagEdits.filter(e => e.to !== e.from).map(e => e.from));
+                for (const e of tagEdits) {
+                    if (e.to === e.from) continue;
+                    cat.tagRenames[e.from] = { to: e.to, at: now };
+                    changed = true;
+                }
+                for (const e of tagEdits) {   // 新名稱目前有效（蓋掉它過去可能有的改名/刪除紀錄）
+                    if (e.to !== e.from && e.to !== null && !renamedAway.has(e.to)) cat.tagRenames[e.to] = { to: e.to, at: now };
+                }
+                if (!changed) { closeModal('catalogModal'); return; }
+
+                this.tags = applyTagRenames(this.tags, cat.tagRenames);
+                const before = this.tasks;
+                this.tasks = applyCatalogToTasks(this.tasks, cat);
+                this.tasks.forEach((t, i) => { if (t !== before[i]) touched++; });
+                // 目前篩選若指向被改名/刪除的標籤，跟著更新
+                const ft = this._filterValue('tag');
+                if (ft !== null) {
+                    const r = resolveTagName(ft, cat.tagRenames);
+                    this.currentFilter = r === null ? 'all' : `tag:${r}`;
+                }
+
+                this.saveToStorage();
+                closeModal('catalogModal');
+                this.renderCategories();
+                this.updateUI();
+                this.showNotification(`✅ 名稱已更新${touched ? `，套用到 ${touched} 個任務` : ''}`);
             }
 
             // ===== 過濾和排序 =====
@@ -3196,10 +3461,11 @@
                     filtered = filtered.filter(t => !isStagedTask(t));
                 }
 
-                // 名稱搜尋：只比對標題，不分大小寫，疊加在目前視圖篩選之上
+                // 搜尋：比對標題與備註，不分大小寫，疊加在目前視圖篩選之上
                 const q = this.searchQuery.trim().toLowerCase();
                 if (q) {
-                    filtered = filtered.filter(t => String(t.title || '').toLowerCase().includes(q));
+                    filtered = filtered.filter(t => String(t.title || '').toLowerCase().includes(q)
+                        || String(t.description || '').toLowerCase().includes(q));
                 }
 
                 if (!this.showCompleted) {
@@ -3245,6 +3511,7 @@
 
             // ===== UI 更新 =====
             updateUI() {
+                this.renderCategories();
                 this.renderGroups();
                 this.renderTags();
                 this.renderTasks();
@@ -3313,7 +3580,7 @@
 
                 if (filtered.length === 0) {
                     taskList.innerHTML = '';
-                    emptyState.querySelector('.empty-state-text').textContent = query ? `找不到名稱含「${query}」的任務` : '沒有任務';
+                    emptyState.querySelector('.empty-state-text').textContent = query ? `找不到名稱或備註含「${query}」的任務` : '沒有任務';
                     emptyState.style.display = 'flex';
                     return;
                 }
@@ -3539,7 +3806,7 @@
                             <span class="task-title">${escapeHtml(task.title)}</span>
                             <div class="task-badges">
                                 <span class="task-category ${task.category}">
-                                    ${CATEGORY_META[task.category]?.emoji} ${task.category}
+                                    ${escapeHtml(categoryText(task.category))}
                                 </span>
                                 ${task.tags && task.tags.length > 0 ? `
                                     <div class="task-tags">
@@ -4145,6 +4412,13 @@
                     });
                 });
 
+                // 編輯分類／群組／標籤
+                document.getElementById('catalogEditBtn').addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.openCatalogModal();
+                });
+                document.getElementById('catalogSaveBtn').addEventListener('click', () => this.saveCatalogModal());
+
                 // 新增標籤
                 document.getElementById('addTagBtn').addEventListener('click', () => {
                     this.openModal('tagModal');
@@ -4363,6 +4637,7 @@
                     document.getElementById('recurringUntilDate').value = task.recurring.untilDate || '';
                     document.getElementById('recurringCount').value = task.recurring.repeatCount || '';
                 }
+                document.getElementById('recurringMode').value = getRecurMode(task);
 
                 document.getElementById('taskGroup').checked = !!task.groupId;
                 document.getElementById('groupOptions').style.display = task.groupId ? 'block' : 'none';
@@ -4421,17 +4696,17 @@
                 groups.forEach(group => {
                     const option = document.createElement('option');
                     option.value = group;
-                    option.textContent = group;
+                    option.textContent = this.groupDisplayName(group);
                     if (group === currentGroupId) {
                         option.selected = true;
                     }
                     groupSelect.appendChild(option);
                 });
 
-                // 週期／順延模式下拉：沿用群組第一個任務的設定，無則預設值
+                // 週期／下次日期模式下拉：沿用群組第一個任務的設定；新群組只重設週期，保留使用者已選的下次日期模式
                 const setGroupModes = (first) => {
                     document.getElementById('groupCycleMode').value = first?.groupCycleMode || 'uniform';
-                    document.getElementById('groupDelayMode').value = first?.groupDelayMode || 'fixed';
+                    if (first) document.getElementById('recurringMode').value = getRecurMode(first);
                 };
 
                 // 監聽選擇變化
@@ -4591,6 +4866,8 @@
 
             createNextRecurringTask(completedTask) {
                 const interval = completedTask.recurring.interval;
+                const mode = getRecurMode(completedTask);
+                const doneDate = this.getTaskById(completedTask.id)?.completedDate || completedTask.completedDate || localDateStr();
                 let nextDate = '';
                 let activeTasks = null;
 
@@ -4600,6 +4877,13 @@
                         .filter(t => t.groupId === completedTask.groupId && !t.completed && t.id !== completedTask.id)
                         .sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
 
+                    // 依完成日順延：剩餘任務從「完成日 + 本任務間隔」起重新串接
+                    const firstActive = activeTasks.find(t => t.recurring && t.recurring.enabled);
+                    if (mode === 'auto' && firstActive) {
+                        firstActive.date = addDaysToDate(doneDate, interval);
+                        this.updateGroupTaskDates(completedTask.groupId, firstActive.id);
+                    }
+
                     const lastTask = activeTasks[activeTasks.length - 1];
                     const cascadeInterval = lastTask?.recurring?.interval ?? interval;
                     if (lastTask && lastTask.date && lastTask.date !== '9999-12-31') {
@@ -4607,13 +4891,14 @@
                     } else if (completedTask.date && completedTask.date !== '9999-12-31') {
                         nextDate = addDaysToDate(completedTask.date, interval);
                     }
+                } else if (mode === 'auto') {
+                    // 獨立迴圈任務・依完成日順延：下一次 = 完成日 + interval
+                    nextDate = addDaysToDate(doneDate, interval);
                 } else {
-                    // 獨立迴圈任務：下一次日期 = 原日期 + interval
-                    if (completedTask.date && completedTask.date !== '9999-12-31') {
-                        nextDate = addDaysToDate(completedTask.date, interval);
-                    } else {
-                        nextDate = addDaysToDate(localDateStr(), interval);
-                    }
+                    // 獨立迴圈任務・依原定排程：下一次 = 排程基準日（不受這次延後影響）+ interval
+                    const base = completedTask.recurring.anchorDate
+                        || (completedTask.date && completedTask.date !== '9999-12-31' ? completedTask.date : localDateStr());
+                    nextDate = addDaysToDate(base, interval);
                 }
 
                 // 迴圈終止檢查：有「重複次數」時以次數為準（不受結束日期提前卡死）；否則以結束日期為準
@@ -4661,11 +4946,10 @@
                     category: completedTask.category,
                     taskType: completedTask.taskType || 'goal',
                     tags: completedTask.tags ? [...completedTask.tags] : [],
-                    recurring: { ...completedTask.recurring, completedCount: (completedTask.recurring.completedCount || 0) + 1 },
+                    recurring: { ...completedTask.recurring, completedCount: (completedTask.recurring.completedCount || 0) + 1, mode, anchorDate: nextDate || null },
                     groupId: completedTask.groupId || null,
-                    groupName: completedTask.groupName || null,
+                    groupName: completedTask.groupId ? this.groupDisplayName(completedTask.groupId) : null,
                     groupCycleMode: completedTask.groupCycleMode || 'uniform',
-                    groupDelayMode: completedTask.groupDelayMode || 'fixed',
                     groupOrder: newGroupOrder,
                     actualTime: null,
                     nextStepNotes: null,
@@ -4751,7 +5035,7 @@
                 // 有「重複次數」的迴圈任務被順延 → 一併順延預定結束日期，涵蓋到做滿總次數
                 this.recomputeRecurringUntil(task);
                 this.saveToStorage();
-                if (task.groupId && task.groupDelayMode === 'auto') {
+                if (task.groupId && getRecurMode(task) === 'auto') {
                     if (affectedGroupIds) {
                         affectedGroupIds.add(task.groupId);
                     } else {
@@ -5251,10 +5535,10 @@
                     '- time：有提到具體時刻才填 HH:MM（24 小時制，下午3點 → 15:00；早上沒說幾點不要猜），否則 null。只有 scheduled 才可填。',
                     '- estimatedTime：10 分鐘以內的小事 → "10min"；約 30 分鐘 → "30min"；超過 30 分鐘 → "30plus" 並填 blocks＝所需分鐘數 ÷ 30 無條件進位（至少 2，例：兩小時 → 4）；零碎、分次進行、無法估計連續時間 → "non-continuous"。沒提時長就依常識估計。非 30plus 時 blocks 為 null。',
                     '- category（只能四選一）：',
-                    '  - "career" 💼 事業：工作、上課、讀書、考試、作業、報告、研究、學習技能、求職。凡是學業相關都屬此類。',
-                    '  - "life" 🏠 生活必須：家事、打掃、採買、煮飯、繳費、看醫生、牙醫、辦手續、搬家、照顧家人、雜事。',
-                    '  - "recharge" ⚡ 充電活動：運動、健身、跑步、休閒娛樂、興趣、閱讀課外書、看電影、旅遊、和朋友聚會、放鬆。',
-                    '  - "review" 🔍 復盤：回顧、反思、寫日記、週記、月整理、檢討、規劃下週。',
+                    `  - "career" ${categoryText('career')}（預設：事業）：工作、上課、讀書、考試、作業、報告、研究、學習技能、求職。凡是學業相關都屬此類。`,
+                    `  - "life" ${categoryText('life')}（預設：生活必須）：家事、打掃、採買、煮飯、繳費、看醫生、牙醫、辦手續、搬家、照顧家人、雜事。`,
+                    `  - "recharge" ${categoryText('recharge')}（預設：充電活動）：運動、健身、跑步、休閒娛樂、興趣、閱讀課外書、看電影、旅遊、和朋友聚會、放鬆。`,
+                    `  - "review" ${categoryText('review')}（預設：復盤）：回顧、反思、寫日記、週記、月整理、檢討、規劃下週。`,
                     '- taskType：預設 "goal"（做完就好的事）；明確是「做越多越好、累積時數」的練習（例：練琴、背單字累積）→ "accumulative"；提前完成未來才需要做的事 → "ahead"。拿不準就用 "goal"。',
                     `- tags：只能從既有標籤中挑選完全相符的名稱：${tags}。沒有適合的就空陣列，不要自創標籤。`,
                     '- 重複性任務（每天、每3天、每週…）：recurringInterval 填間隔天數（每天 1、每週 7）；提到次數填 recurringCount；提到結束日期填 recurringUntil（YYYY-MM-DD）；不知道就 null。重複任務必須是 scheduled，沒說從哪天開始就從今天開始。非重複任務這三欄都是 null。',
@@ -5531,7 +5815,7 @@
                         category: q('.ai-f-category').value,
                         taskType: q('.ai-f-taskType').value,
                         tags: draft.tags,
-                        recurring: recOn ? { enabled: true, ...draft.recurring } : null,
+                        recurring: recOn ? { enabled: true, mode: 'fixed', ...draft.recurring, anchorDate: date } : null,
                         groupId: null,
                         groupOrder: null,
                         actualTime: null,
@@ -5807,7 +6091,7 @@
                         const catTb = d.timeBalance;
                         const diffColor = catTb >= 0 ? '#51cf66' : '#ff6b6b';
                         catHtml += `<div style="background:var(--bg-tertiary);padding:10px;border-radius:6px;text-align:center;">
-                            <div style="font-weight:600;margin-bottom:4px;">${CATEGORY_META[cat] ? `${CATEGORY_META[cat].emoji} ${CATEGORY_META[cat].label}` : cat}</div>
+                            <div style="font-weight:600;margin-bottom:4px;">${escapeHtml(categoryText(cat))}</div>
                             <div style="font-size:0.8rem;color:var(--text-secondary);">${d.count} 個任務</div>
                             <div style="font-size:0.8rem;">${d.planned}分 → ${d.actual}分</div>
                             <div style="font-size:0.8rem;color:${diffColor};">${catTb >= 0 ? '+' : ''}${catTb}分（時間收支）</div>
@@ -6012,13 +6296,16 @@
 
                 if (document.getElementById('taskRecurring').checked) {
                     // 保留既有 recurring 的其他欄位（尤其 completedCount），只覆寫表單控制的三項
+                    // anchorDate＝「依原定排程」的基準日：表單儲存的日期即為新的排程基準（重新安排到今天、拖曳不會改它）
                     const prevRec = this.currentEditingTask?.recurring || {};
                     taskData.recurring = {
                         ...prevRec,
                         enabled: true,
                         interval: parseInt(document.getElementById('recurringDays').value),
                         untilDate: document.getElementById('recurringUntilDate').value || null,
-                        repeatCount: parseInt(document.getElementById('recurringCount').value) || null
+                        repeatCount: parseInt(document.getElementById('recurringCount').value) || null,
+                        mode: document.getElementById('recurringMode').value === 'auto' ? 'auto' : 'fixed',
+                        anchorDate: (date && date !== '9999-12-31') ? date : null
                     };
                 }
 
@@ -6030,8 +6317,7 @@
                     if (groupSelect) {
                         // 使用既有群組
                         groupId = groupSelect;
-                        const existingTask = this.tasks.find(t => t.groupId === groupId);
-                        groupName = existingTask ? existingTask.groupName : groupId;
+                        groupName = this.groupDisplayName(groupId);
                     } else {
                         // 建立新群組
                         groupName = document.getElementById('newGroupName').value.trim();
@@ -6045,7 +6331,6 @@
                     taskData.groupId = groupId;
                     taskData.groupName = groupName;
                     taskData.groupCycleMode = document.getElementById('groupCycleMode').value || 'uniform';
-                    taskData.groupDelayMode = document.getElementById('groupDelayMode').value || 'fixed';
                     // 編輯既有任務且群組未更換時，保留原本的 groupOrder；其餘情況排到最後
                     if (this.currentEditingTask && this.currentEditingTask.groupId === groupId) {
                         taskData.groupOrder = this.currentEditingTask.groupOrder;
@@ -6096,7 +6381,8 @@
                     this.tasks.forEach(t => {
                         if (t.groupId === taskData.groupId) {
                             t.groupCycleMode = taskData.groupCycleMode;
-                            t.groupDelayMode = taskData.groupDelayMode;
+                            delete t.groupDelayMode;   // 舊欄位（v6.6.0 起改存於 recurring.mode）
+                            if (t.recurring && taskData.recurring) t.recurring.mode = taskData.recurring.mode;
                             if (taskData.groupCycleMode === 'uniform' && t.recurring && taskData.recurring) {
                                 t.recurring.interval = taskData.recurring.interval;
                             }
@@ -6125,7 +6411,7 @@
                     if (task.recurring && task.recurring.enabled && task.groupId && !groups[task.groupId]) {
                         groups[task.groupId] = {
                             groupId: task.groupId,
-                            name: task.groupName || task.groupId
+                            name: this.groupDisplayName(task.groupId)
                         };
                     }
                 });
