@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.6.3 - 任務管理工具</title>
+    <title>TodoMaster v6.7.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -510,7 +510,7 @@
         .ai-dup { color: #f59f00; font-weight: 600; }
         .ai-diff { margin: 2px 0 0 0; padding-left: 18px; }
         .ai-diff li { white-space: pre-wrap; }
-        .ai-card.upd .ai-card-row, .ai-card:not(.upd) .ai-diff { display: none; }
+        .ai-card:not(.upd) .ai-diff { display: none; }
         .subtask-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
         .subtask-row .task-title { flex: 1; font-size: 0.9rem; }
         .subtask-time { color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; }
@@ -1183,7 +1183,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.6.3';
+        const APP_VERSION = 'v6.7.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1231,6 +1231,55 @@
             accumulative: '📈 累積型',
             ahead: '⏭️ 超前部署'
         };
+        // 任務編輯視窗與 AI 預覽卡片共用的下拉選項文字（v6.7.0：兩邊一致）
+        const DATE_MODE_OPTIONS = { scheduled: '具體日期', unscheduled: '📥 暫存區（未排程，之後再排）', unlimited: '不限期' };
+        const TIME_OPTIONS = { '10min': '10 分鐘內', '30min': '30 分鐘 (1 block)', '30plus': '多 blocks (超過 30 分鐘)', 'non-continuous': '非連續' };
+        const TASK_TYPE_OPTIONS = {
+            accumulative: '📈 累積型 — 賺得「實際－預定」',
+            goal: '🎯 任務型 — 提早賺得，超時延遲「預定－實際」',
+            ahead: '⏭️ 超前部署 — 賺得「實際用時」'
+        };
+        const PINNED_OPTIONS = { '': '無', top: '📌 置頂', bottom: '📌 置底' };
+        // 口語時段 → 預設時刻（只說「早上」沒說幾點時使用）
+        const TIME_WORD_DEFAULTS = [
+            ['凌晨', '01:00'], ['清晨', '06:00'], ['早晨', '08:00'], ['早上', '08:00'], ['上午', '09:00'], ['中午', '12:00'],
+            ['下午', '13:00'], ['傍晚', '17:30'], ['晚上', '19:00'], ['夜晚', '19:00'], ['深夜', '23:00'], ['半夜', '23:00']
+        ];
+        const CN_DIGITS = { 零: 0, 一: 1, 二: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+        function cnToNum(str) {
+            if (/^\d+$/.test(str)) return parseInt(str, 10);
+            if (str === '十') return 10;
+            const m = str.match(/^([一二兩三四五六七八九])?十([一二三四五六七八九])?$/);
+            if (m) return (m[1] ? CN_DIGITS[m[1]] : 1) * 10 + (m[2] ? CN_DIGITS[m[2]] : 0);
+            return str in CN_DIGITS ? CN_DIGITS[str] : NaN;
+        }
+        // 從口語文字抓出當天時刻（HH:MM），抓不到回傳 ''。支援「下午3點半」「早上9:30」「15點」「晚上」等
+        function parseTimeFromText(text) {
+            const src = String(text || '');
+            const re = /(凌晨|清晨|早晨|早上|上午|中午|下午|傍晚|晚上|夜晚|深夜|半夜)?\s*(\d{1,2}|[零一二兩三四五六七八九十]{1,3})\s*(:|：|[點点時时])\s*(半|整|[一三]刻|\d{1,2})?/;
+            const m = src.match(re);
+            if (m) {
+                let h = cnToNum(m[2]);
+                const tail = m[4] || '';
+                let min = 0;
+                if (tail === '半') min = 30;
+                else if (tail === '一刻') min = 15;
+                else if (tail === '三刻') min = 45;
+                else if (/^\d/.test(tail)) min = parseInt(tail, 10);
+                if (Number.isFinite(h) && h <= 24 && min < 60) {
+                    const p = m[1] || '';
+                    if (/下午|傍晚|晚上|夜晚/.test(p) && h < 12) h += 12;
+                    else if (p === '中午' && h <= 6) h += 12;
+                    else if (/深夜|半夜/.test(p)) { if (h === 12) h = 0; else if (h >= 6 && h < 12) h += 12; }
+                    else if (p === '凌晨' && h === 12) h = 0;
+                    if (h === 24) h = 0;
+                    return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+                }
+            }
+            const hit = TIME_WORD_DEFAULTS.find(([w]) => src.includes(w));
+            return hit ? hit[1] : '';
+        }
+
         // AI 新增任務（v6.5.1 Gemini 版）：瀏覽器直接呼叫 Gemini API；Key 只存這台裝置，不進雲端同步與備份檔
         // 免費額度按模型分開計算：第一個額度用完或忙碌時自動改用下一個
         const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
@@ -5638,7 +5687,7 @@
                 }
                 const scheduled = newDate && newDate !== '9999-12-31';
                 const oldTime = t.time || '';
-                const newTime = !scheduled ? '' : (d.dateMode === 'scheduled' && d.time) ? d.time : oldTime;
+                const newTime = !scheduled ? '' : d.time ? d.time : oldTime;
                 if (newTime !== oldTime) {
                     updates.time = newTime || null;
                     changes.push(`🕐 時刻：${oldTime || '未指定'} → ${newTime || '未指定'}`);
@@ -5678,7 +5727,7 @@
                     '欄位規則：',
                     '- title：簡短清楚的任務名稱（繁體中文，不含日期時間）。description：補充細節，沒有就空字串。',
                     '- dateMode：有明確日期或相對日期（今天、明天、週五、3天後…）→ "scheduled" 並填 date（YYYY-MM-DD）；說「之後再排」或完全沒提到時間 → "unscheduled"（暫存區），date 為 null；說「沒有期限、長期、有空再做」→ "unlimited"，date 為 null。「週五前」這類期限，date 填該日。',
-                    '- time：有提到具體時刻才填 HH:MM（24 小時制，下午3點 → 15:00；早上沒說幾點不要猜），否則 null。只有 scheduled 才可填。',
+                    '- time：有提到時刻或時段就填 HH:MM（24 小時制）。明確時刻照填（下午3點 → 15:00、晚上8點半 → 20:30）；只說時段沒說幾點時用預設：凌晨 01:00、清晨 06:00、早上 08:00、上午 09:00、中午 12:00、下午 13:00、傍晚 17:30、晚上 19:00、深夜 23:00。完全沒提時間才填 null。只有 scheduled 才可填（只提時段但沒提日期時，視為今天，dateMode 填 scheduled）。',
                     '- estimatedTime：10 分鐘以內的小事 → "10min"；約 30 分鐘 → "30min"；超過 30 分鐘 → "30plus" 並填 blocks＝所需分鐘數 ÷ 30 無條件進位（至少 2，例：兩小時 → 4）；零碎、分次進行、無法估計連續時間 → "non-continuous"。沒提時長就依常識估計。非 30plus 時 blocks 為 null。',
                     '- category（只能從以下選一個 key）：',
                     `  - "career" ${categoryText('career')}（預設：事業）：工作、上課、讀書、考試、作業、報告、研究、學習技能、求職。凡是學業相關都屬此類。`,
@@ -5780,8 +5829,36 @@
                 throw new Error('Gemini 服務暫時忙碌，請稍後再試');
             }
 
+            // 找出使用者原文中對應某任務標題的那一小段（以標點切段、標題字元重疊最多者）；只有一項任務時用全文
+            _aiSegmentFor(title, srcText, single) {
+                if (single) return srcText;
+                const chars = [...new Set([...title].filter(c => /\S/.test(c)))];
+                let best = '', bestScore = 1;
+                for (const seg of srcText.split(/[，,、。；;\n]+/)) {
+                    const score = chars.filter(c => seg.includes(c)).length;
+                    if (score > bestScore) { best = seg; bestScore = score; }
+                }
+                return best;
+            }
+
+            // 既有任務套用 AI 建議後的欄位值（供預覽卡片預填）：以任務現值為底，疊上 _aiDiff 算出的修改
+            _aiUpdateVals(draft, t) {
+                const u = draft.diff ? draft.diff.updates : {};
+                const date = 'date' in u ? u.date : (t.date || '');
+                return {
+                    dateMode: !date ? 'unscheduled' : date === '9999-12-31' ? 'unlimited' : 'scheduled',
+                    date: date && date !== '9999-12-31' ? date : '',
+                    time: 'time' in u ? (u.time || '') : (t.time || ''),
+                    estimatedTime: t.estimatedTime || '30min',
+                    blocks: t.blocks || null,
+                    category: CATEGORY_META[t.category] ? t.category : draft.category,
+                    taskType: t.taskType || 'goal',
+                    pinned: t.pinned || ''
+                };
+            }
+
             // 把 AI 回傳的一筆草稿整理成合法值（白名單欄位、不合法就退回新增表單的預設值）
-            normalizeAiDraft(d) {
+            normalizeAiDraft(d, srcText = '', single = false) {
                 if (!d || typeof d !== 'object') return null;
                 const title = String(d.title || '').trim().slice(0, 200);
                 if (!title) return null;
@@ -5821,6 +5898,17 @@
                     // 只接受確實存在的既有標題，避免模型幻覺
                     duplicateOf: typeof d.duplicateOf === 'string' && this._aiExistingTitles().includes(d.duplicateOf.trim()) ? d.duplicateOf.trim() : ''
                 };
+                // 時刻保底：AI 漏填時，從使用者原文中對應這項任務的那段話解析（早上、下午3點半…）
+                if (!draft.time && srcText) {
+                    const t = parseTimeFromText(this._aiSegmentFor(draft.title, srcText, single));
+                    if (t) {
+                        draft.time = t;
+                        if (draft.dateMode !== 'scheduled' && !draft.duplicateOf) {
+                            draft.dateMode = 'scheduled';
+                            draft.date = localDateStr();
+                        }
+                    }
+                }
                 // 對應到既有任務：預先算好要編輯的欄位
                 const target = draft.duplicateOf ? this._aiFindExisting(draft.duplicateOf) : null;
                 draft.targetId = target ? target.id : null;
@@ -5838,7 +5926,8 @@
                 btn.textContent = '解析中…';
                 this._aiSetMsg('');
                 try {
-                    const drafts = (await this._aiRequest(text)).map(d => this.normalizeAiDraft(d)).filter(Boolean);
+                    const raw = await this._aiRequest(text);
+                    const drafts = raw.map(d => this.normalizeAiDraft(d, text, raw.length === 1)).filter(Boolean);
                     this.renderAiPreview(drafts);
                     this._aiSetMsg(drafts.length ? `解析出 ${drafts.length} 項任務，確認或微調後按「套用」` : '沒有解析出任務，請換個說法再試', drafts.length ? 'ok' : 'err');
                 } catch (e) {
@@ -5850,9 +5939,9 @@
             }
 
             renderAiPreview(drafts) {
-                const opts = (map, sel, label) => Object.keys(map)
-                    .map(k => `<option value="${k}"${k === sel ? ' selected' : ''}>${escapeHtml(label(map[k]))}</option>`).join('');
-                const dateModes = { scheduled: '📅 具體日期', unscheduled: '📥 暫存區', unlimited: '♾️ 不限期' };
+                // 下拉選項與「新增／編輯任務」視窗一致（共用 DATE_MODE_OPTIONS 等常數）；選取值由 fill() 依模式填入
+                const opts = (map, label) => Object.keys(map)
+                    .map(k => `<option value="${k}">${escapeHtml(label(map[k]))}</option>`).join('');
                 const box = document.getElementById('aiPreview');
                 box.innerHTML = drafts.map((d, i) => {
                     const rec = d.recurring;
@@ -5873,15 +5962,18 @@
                         <div class="ai-card-body">
                             <input type="text" class="ai-f-title" value="${escapeHtml(d.title)}" aria-label="任務名稱">${dupBox}
                             <div class="ai-card-row">
-                                <select class="ai-f-dateMode" aria-label="日期模式">${opts(dateModes, d.dateMode, v => v)}</select>
-                                <input type="date" class="ai-f-date" value="${escapeHtml(d.date)}" aria-label="日期">
-                                <input type="time" class="ai-f-time" value="${escapeHtml(d.time)}" aria-label="時刻">
+                                <select class="ai-f-dateMode" aria-label="預定日期">${opts(DATE_MODE_OPTIONS, v => v)}</select>
+                                <input type="date" class="ai-f-date" aria-label="日期">
+                                <input type="time" class="ai-f-time" aria-label="當天時刻">
                             </div>
                             <div class="ai-card-row">
-                                <select class="ai-f-category" aria-label="分類">${opts(CATEGORY_META, d.category, m => `${m.emoji} ${m.label}`)}</select>
-                                <select class="ai-f-estimatedTime" aria-label="預計時間">${opts(TIME_META, d.estimatedTime, m => `${m.emoji} ${m.label}`)}</select>
-                                <input type="number" class="ai-f-blocks" min="2" max="99" value="${d.blocks || 2}" aria-label="blocks 數" title="blocks（每個 ${BLOCK_MINUTES} 分鐘）">
-                                <select class="ai-f-taskType" aria-label="任務類型">${opts(TASK_TYPE_META, d.taskType, v => v)}</select>
+                                <select class="ai-f-pinned" aria-label="釘選">${opts(PINNED_OPTIONS, v => v)}</select>
+                                <select class="ai-f-estimatedTime" aria-label="預計時間">${opts(TIME_OPTIONS, v => v)}</select>
+                                <input type="number" class="ai-f-blocks" min="2" max="99" value="2" aria-label="blocks 數" title="blocks（每個 ${BLOCK_MINUTES} 分鐘）">
+                            </div>
+                            <div class="ai-card-row">
+                                <select class="ai-f-taskType" aria-label="任務類型">${opts(TASK_TYPE_OPTIONS, v => v)}</select>
+                                <select class="ai-f-category" aria-label="分類">${opts(CATEGORY_META, m => `${m.emoji} ${m.label}`)}</select>
                             </div>
                             <div class="ai-card-meta">
                                 ${d.description ? `<div>📝 ${escapeHtml(d.description)}</div>` : ''}
@@ -5894,8 +5986,26 @@
                 }).join('');
                 this.aiDrafts = drafts;
 
+                // 把一組欄位值填進卡片的下拉／輸入框；「更新既有」用既有任務疊上 AI 建議、「新增」用 AI 草稿
+                const fill = card => {
+                    const q = s => card.querySelector(s);
+                    const d = this.aiDrafts[Number(card.dataset.i)];
+                    const target = d.targetId ? this.getTaskById(d.targetId) : null;
+                    const upd = !!target && q('.ai-f-action')?.value === 'update';
+                    const v = upd ? this._aiUpdateVals(d, target) : { ...d, pinned: '' };
+                    q('.ai-f-dateMode').value = v.dateMode;
+                    q('.ai-f-date').value = v.date || '';
+                    q('.ai-f-time').value = v.time || '';
+                    q('.ai-f-pinned').value = v.pinned || '';
+                    q('.ai-f-estimatedTime').value = v.estimatedTime;
+                    q('.ai-f-blocks').value = v.blocks || 2;
+                    q('.ai-f-taskType').value = v.taskType;
+                    q('.ai-f-category').value = v.category;
+                    card.dataset.mode = upd ? 'update' : 'create';
+                };
                 const sync = card => {
                     const q = s => card.querySelector(s);
+                    if (card.dataset.mode !== ((q('.ai-f-action')?.value === 'update') ? 'update' : 'create')) fill(card);
                     const upd = q('.ai-f-action')?.value === 'update';
                     card.classList.toggle('upd', upd);
                     q('.ai-f-title').readOnly = upd;
@@ -5906,6 +6016,7 @@
                     card.classList.toggle('off', !q('.ai-f-on').checked);
                 };
                 box.querySelectorAll('.ai-card').forEach(card => {
+                    fill(card);
                     sync(card);
                     card.addEventListener('change', () => { sync(card); this._aiUpdateAddBtn(); });
                 });
@@ -5934,7 +6045,41 @@
                     const q = s => card.querySelector(s);
                     const draft = this.aiDrafts[Number(card.dataset.i)];
                     if (q('.ai-f-action')?.value === 'update') {
-                        if (draft.targetId && Object.keys(draft.diff.updates).length) edits.push(draft);
+                        const target = draft.targetId ? this.getTaskById(draft.targetId) : null;
+                        if (!target) continue;
+                        // 讀回卡片目前的值（使用者可在預覽中逐項微調），只把與既有任務不同的欄位寫入
+                        const dateMode = q('.ai-f-dateMode').value;
+                        const date = dateMode === 'scheduled' ? q('.ai-f-date').value : dateMode === 'unlimited' ? '9999-12-31' : '';
+                        if (dateMode === 'scheduled' && !date) { alert(`「${target.title}」選了具體日期但沒有填日期`); q('.ai-f-date').focus(); return; }
+                        const estimatedTime = q('.ai-f-estimatedTime').value;
+                        const blocks = estimatedTime === '30plus' ? Math.min(99, Math.max(2, parseInt(q('.ai-f-blocks').value) || 2)) : null;
+                        const want = {
+                            date,
+                            time: dateMode === 'scheduled' ? (q('.ai-f-time').value || null) : null,
+                            estimatedTime,
+                            blocks,
+                            taskType: q('.ai-f-taskType').value,
+                            category: q('.ai-f-category').value,
+                            pinned: q('.ai-f-pinned').value || null
+                        };
+                        const have = {
+                            date: target.date || '', time: target.time || null, estimatedTime: target.estimatedTime,
+                            blocks: target.blocks || null, taskType: target.taskType, category: target.category, pinned: target.pinned || null
+                        };
+                        const updates = {};
+                        for (const k of Object.keys(want)) if (want[k] !== have[k]) updates[k] = want[k];
+                        // 描述與標籤的合併仍沿用 _aiDiff 的結果
+                        for (const k of ['description', 'tags']) if (k in draft.diff.updates) updates[k] = draft.diff.updates[k];
+                        if ('estimatedTime' in updates || 'blocks' in updates) {
+                            // 比照 saveTask()：改了 block 數就保留已完成進度（上限為新 block 數）
+                            if (!blocks) { updates.completedBlocks = 0; updates.blockTimes = []; }
+                            else {
+                                const done = Math.min(target.completedBlocks || 0, blocks);
+                                updates.completedBlocks = done;
+                                updates.blockTimes = (target.blockTimes || []).slice(0, done);
+                            }
+                        }
+                        if (Object.keys(updates).length) edits.push({ targetId: target.id, updates });
                         continue;
                     }
                     const title = q('.ai-f-title').value.trim();
@@ -5967,7 +6112,7 @@
                         groupOrder: null,
                         actualTime: null,
                         nextStepNotes: null,
-                        pinned: null
+                        pinned: q('.ai-f-pinned').value || null
                     });
                 }
                 if (!taskDatas.length && !edits.length) return;
@@ -5976,7 +6121,7 @@
                 for (const draft of edits) {
                     const task = this.getTaskById(draft.targetId);
                     if (!task) continue;
-                    this.updateTask(task.id, draft.diff.updates);
+                    this.updateTask(task.id, draft.updates);
                     // 比照 saveTask() 收尾：群組重複任務重算群組日期，其餘校正重複任務結束日
                     if (task.groupId && task.recurring && task.recurring.enabled) this.updateGroupTaskDates(task.groupId, task.id);
                     else if (!task.groupId) this.recomputeRecurringUntil(task);
