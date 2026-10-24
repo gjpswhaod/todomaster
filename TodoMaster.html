@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.7.0 - 任務管理工具</title>
+    <title>TodoMaster v6.7.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -1040,6 +1040,19 @@
             cursor: pointer;
             text-decoration: underline;
         }
+        .ai-progress { margin-top: 12px; }
+        .ai-progress-bar { height: 8px; border-radius: 4px; background: var(--bg-tertiary); overflow: hidden; }
+        .ai-progress-fill {
+            height: 100%; width: 0; border-radius: 4px; background: var(--accent-primary);
+            transition: width 0.4s ease;
+        }
+        .ai-progress.waiting .ai-progress-fill {
+            background-image: linear-gradient(45deg, rgba(255,255,255,.3) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.3) 50%, rgba(255,255,255,.3) 75%, transparent 75%);
+            background-size: 16px 16px;
+            animation: aiStripe 0.8s linear infinite;
+        }
+        @keyframes aiStripe { to { background-position: 16px 0; } }
+        .ai-progress-label { margin-top: 6px; font-size: 0.8rem; color: var(--text-secondary); }
         .ai-hint {
             font-size: 0.75rem;
             color: var(--text-secondary);
@@ -1183,7 +1196,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.7.0';
+        const APP_VERSION = 'v6.7.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1283,6 +1296,8 @@
         // AI 新增任務（v6.5.1 Gemini 版）：瀏覽器直接呼叫 Gemini API；Key 只存這台裝置，不進雲端同步與備份檔
         // 免費額度按模型分開計算：第一個額度用完或忙碌時自動改用下一個
         const AI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
+        const AI_STEPS = 5; // 解析進度條的步驟數
+        const AI_TIMEOUT_MS = 25000; // 單一模型最久等待時間，逾時改用下一個模型
         const AI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta/models/';
         const AI_KEY_STORAGE = 'todoGeminiApiKey';
         // 一天三時段：分界（分鐘數下界）與拖曳落在該段最前面時的預設時刻
@@ -1781,6 +1796,10 @@
                 <div style="display: flex; justify-content: flex-end; gap: 8px;">
                     <span class="ai-hint">Ctrl＋Enter 送出</span>
                     <button type="button" class="btn btn-primary" id="aiParseBtn">✨ 解析</button>
+                </div>
+                <div id="aiProgress" class="ai-progress" style="display: none;" role="status" aria-live="polite">
+                    <div class="ai-progress-bar"><div class="ai-progress-fill" id="aiProgressFill"></div></div>
+                    <div class="ai-progress-label" id="aiProgressLabel"></div>
                 </div>
                 <div id="aiPreview" class="ai-preview"></div>
             </div>
@@ -5785,36 +5804,61 @@
             }
 
             // 依序嘗試 AI_MODELS：額度用完（429）或忙碌（5xx）就換下一個模型；其餘錯誤直接回報
-            async _aiRequest(text) {
-                const body = JSON.stringify({
+            // 單次呼叫（含讀完回應本文）；逾時 AI_TIMEOUT_MS 就中止。回傳 { res, data, timedOut }
+            async _aiCall(model, body) {
+                const ctrl = new AbortController();
+                const timer = setTimeout(() => ctrl.abort(), AI_TIMEOUT_MS);
+                try {
+                    const res = await fetch(`${AI_API_BASE}${model}:generateContent`, {
+                        method: 'POST',
+                        headers: { 'content-type': 'application/json', 'x-goog-api-key': this._aiKey() },
+                        body,
+                        signal: ctrl.signal
+                    });
+                    let data = null;
+                    try { data = await res.json(); } catch (_) { /* 非 JSON */ }
+                    return { res, data, timedOut: false };
+                } catch (e) {
+                    if (ctrl.signal.aborted) return { res: null, data: null, timedOut: true };
+                    throw new Error(navigator.onLine === false ? '目前離線，請連上網路再試' : '連不上 Gemini API，請檢查網路後再試');
+                } finally {
+                    clearTimeout(timer);
+                }
+            }
+
+            // onStep(步驟編號, 說明) 回報進度給解析視窗的進度條
+            async _aiRequest(text, onStep = () => {}) {
+                onStep(1, '整理你的描述與既有任務清單');
+                const gen = { responseMimeType: 'application/json', responseJsonSchema: this._aiSchema() };
+                const mkBody = thinkingOff => JSON.stringify({
                     systemInstruction: { parts: [{ text: this._aiSystemPrompt() }] },
                     contents: [{ role: 'user', parts: [{ text }] }],
-                    generationConfig: { responseMimeType: 'application/json', responseJsonSchema: this._aiSchema() }
+                    // 結構化抽取不需要深度思考；預設開啟思考是等很久的主因，故關閉
+                    generationConfig: thinkingOff ? { ...gen, thinkingConfig: { thinkingBudget: 0 } } : gen
                 });
                 let lastStatus = 0;
-                for (const model of AI_MODELS) {
-                    let res;
-                    try {
-                        res = await fetch(`${AI_API_BASE}${model}:generateContent`, {
-                            method: 'POST',
-                            headers: { 'content-type': 'application/json', 'x-goog-api-key': this._aiKey() },
-                            body
-                        });
-                    } catch (_) {
-                        throw new Error(navigator.onLine === false ? '目前離線，請連上網路再試' : '連不上 Gemini API，請檢查網路後再試');
+                let timedOut = false;
+                for (const [idx, model] of AI_MODELS.entries()) {
+                    onStep(2, idx ? `上一個模型沒有回應，改送出給 ${model}` : `送出給 ${model}`);
+                    onStep(3, `等待 ${model} 思考並回覆（最多 ${AI_TIMEOUT_MS / 1000} 秒）`);
+                    let { res, data, timedOut: to } = await this._aiCall(model, mkBody(true));
+                    // 該模型不接受關閉思考的設定：去掉設定重送一次
+                    if (res && res.status === 400 && /thinking/i.test(data?.error?.message || '')) {
+                        ({ res, data, timedOut: to } = await this._aiCall(model, mkBody(false)));
                     }
-                    if (res.status === 429 || res.status >= 500) {
+                    if (to) { timedOut = true; continue; }
+                    onStep(4, '收到回應，解析 AI 回傳的資料');
+                    if (res.status === 429 || res.status >= 500 || res.status === 404) {
                         lastStatus = res.status;
                         continue;
                     }
                     if (!res.ok) {
-                        let detail = '';
-                        try { detail = (await res.json())?.error?.message || ''; } catch (_) { /* ignore */ }
+                        const detail = data?.error?.message || '';
                         if (res.status === 401 || (res.status === 400 && /API[_ ]key/i.test(detail))) throw new Error('API Key 無效，請按「更換」重新設定');
                         if (res.status === 403) throw new Error('這個 API Key 沒有使用權限' + (detail ? `：${detail}` : ''));
                         throw new Error(`請求失敗（${res.status}）${detail ? '：' + detail : ''}`);
                     }
-                    const data = await res.json();
+                    if (!data) throw new Error('AI 回應格式不正確，請再試一次');
                     if (data.promptFeedback?.blockReason) throw new Error('AI 無法處理這段內容，請換個說法');
                     const cand = (data.candidates || [])[0];
                     if (!cand) throw new Error('AI 沒有回應，請再試一次');
@@ -5825,6 +5869,7 @@
                     try { parsed = JSON.parse(out); } catch (_) { throw new Error('AI 回應格式不正確，請再試一次'); }
                     return Array.isArray(parsed?.tasks) ? parsed.tasks : [];
                 }
+                if (timedOut && !lastStatus) throw new Error(`等了 ${AI_TIMEOUT_MS / 1000} 秒 Gemini 都沒有回應（已試過所有模型），請檢查網路或稍後再試`);
                 if (lastStatus === 429) throw new Error('今天的免費額度已用完（或太頻繁），請稍後或明天再試');
                 throw new Error('Gemini 服務暫時忙碌，請稍後再試');
             }
@@ -5916,6 +5961,25 @@
                 return draft;
             }
 
+            // 解析進度條：共 5 步（整理 → 送出 → 等待回覆 → 解析回傳 → 比對產生預覽）；等待回覆那步顯示已等候秒數
+            _aiProgress(step, label) {
+                const box = $('aiProgress');
+                clearInterval(this._aiProgressTimer);
+                if (!step) { box.style.display = 'none'; return; }
+                const total = AI_STEPS;
+                box.style.display = '';
+                box.classList.toggle('waiting', step === 3);
+                // 等待回覆那步條會填到該步的一半並閃動，表示還在進行
+                $('aiProgressFill').style.width = `${Math.round(((step - (step === 3 ? 0.5 : 1)) / total) * 100)}%`;
+                const render = () => {
+                    const secs = step === 3 ? `（已等 ${Math.floor((Date.now() - this._aiStepAt) / 1000)} 秒）` : '';
+                    $('aiProgressLabel').textContent = `步驟 ${step}/${total}：${label}${secs}`;
+                };
+                this._aiStepAt = Date.now();
+                render();
+                if (step === 3) this._aiProgressTimer = setInterval(render, 500);
+            }
+
             async runAiParse() {
                 const input = document.getElementById('aiInput');
                 const btn = document.getElementById('aiParseBtn');
@@ -5926,13 +5990,15 @@
                 btn.textContent = '解析中…';
                 this._aiSetMsg('');
                 try {
-                    const raw = await this._aiRequest(text);
+                    const raw = await this._aiRequest(text, (n, label) => this._aiProgress(n, label));
+                    this._aiProgress(5, '比對既有任務並產生預覽');
                     const drafts = raw.map(d => this.normalizeAiDraft(d, text, raw.length === 1)).filter(Boolean);
                     this.renderAiPreview(drafts);
                     this._aiSetMsg(drafts.length ? `解析出 ${drafts.length} 項任務，確認或微調後按「套用」` : '沒有解析出任務，請換個說法再試', drafts.length ? 'ok' : 'err');
                 } catch (e) {
                     this._aiSetMsg('⚠️ ' + (e && e.message ? e.message : e), 'err');
                 } finally {
+                    this._aiProgress(0);
                     btn.disabled = false;
                     btn.textContent = '✨ 解析';
                 }
