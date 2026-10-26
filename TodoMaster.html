@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.8.0 - 任務管理工具</title>
+    <title>TodoMaster v6.8.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -315,6 +315,7 @@
         .pause-switch input:checked + .slider { background: var(--accent-primary); }
         .pause-switch input:checked + .slider::before { transform: translateX(16px); background: #fff; }
         .pause-inline { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+        .group-pause-bar[hidden] { display: none; }
         .group-pause-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 12px; background: var(--bg-tertiary); border-radius: 8px; font-size: 0.9rem; }
         .group-pause-bar .gp-info { color: var(--text-secondary); font-size: 0.8rem; flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
 
@@ -1207,7 +1208,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.8.0';
+        const APP_VERSION = 'v6.8.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
