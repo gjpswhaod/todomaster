@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.0 - 任務管理工具</title>
+    <title>TodoMaster v7.0.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -1244,7 +1244,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.0';
+        const APP_VERSION = 'v7.0.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -4555,6 +4555,38 @@
             }
 
             // ===== 事件設置 =====
+            // 菜單 / 側欄收合切換
+            setupSidebarToggle() {
+                const menuToggleBtn = document.getElementById('menuToggleBtn');
+                const sidebarCloseBtn = document.getElementById('sidebarCloseBtn');
+                const sidebar = document.querySelector('.sidebar');
+
+                if (window.innerWidth <= 768) {
+                    // 手機：overlay 模式（預設隱藏按鈕，JS 顯示）
+                    menuToggleBtn.style.display = 'block';
+                    menuToggleBtn.addEventListener('click', () => {
+                        sidebar.classList.toggle('active');
+                        menuToggleBtn.textContent = sidebar.classList.contains('active') ? '✕ 關閉' : '☰ 菜單';
+                    });
+                } else {
+                    // 桌面：收合模式，從 localStorage 恢復狀態
+                    if (localStorage.getItem('todoSidebarCollapsed') === '1') {
+                        sidebar.classList.add('collapsed');
+                    }
+                    menuToggleBtn.textContent = sidebar.classList.contains('collapsed') ? '☰ 展開' : '☰ 收合';
+                    menuToggleBtn.addEventListener('click', () => {
+                        sidebar.classList.toggle('collapsed');
+                        const isCollapsed = sidebar.classList.contains('collapsed');
+                        localStorage.setItem('todoSidebarCollapsed', isCollapsed ? '1' : '0');
+                        menuToggleBtn.textContent = isCollapsed ? '☰ 展開' : '☰ 收合';
+                    });
+                }
+
+                if (sidebarCloseBtn) {
+                    sidebarCloseBtn.addEventListener('click', () => this.closeSidebarOverlay());
+                }
+            }
+
             setupEventListeners() {
                 // 任務名稱搜尋：即時過濾（只重繪任務清單，統計卡不受影響）；Esc 或 ✕ 清空
                 const searchInput = document.getElementById('taskSearchInput');
@@ -4887,37 +4919,9 @@
                     }
                 });
 
-                // 雲端同步／備份檔的事件監聽已在 setupSyncListeners() 中設定
+                // 雲端同步/備份檔的事件監聽已在 setupSyncListeners() 中設定
 
-                // 菜單 / 側欄收合切換
-                const menuToggleBtn = document.getElementById('menuToggleBtn');
-                const sidebarCloseBtn = document.getElementById('sidebarCloseBtn');
-                const sidebar = document.querySelector('.sidebar');
-
-                if (window.innerWidth <= 768) {
-                    // 手機：overlay 模式（預設隱藏按鈕，JS 顯示）
-                    menuToggleBtn.style.display = 'block';
-                    menuToggleBtn.addEventListener('click', () => {
-                        sidebar.classList.toggle('active');
-                        menuToggleBtn.textContent = sidebar.classList.contains('active') ? '✕ 關閉' : '☰ 菜單';
-                    });
-                } else {
-                    // 桌面：收合模式，從 localStorage 恢復狀態
-                    if (localStorage.getItem('todoSidebarCollapsed') === '1') {
-                        sidebar.classList.add('collapsed');
-                    }
-                    menuToggleBtn.textContent = sidebar.classList.contains('collapsed') ? '☰ 展開' : '☰ 收合';
-                    menuToggleBtn.addEventListener('click', () => {
-                        sidebar.classList.toggle('collapsed');
-                        const isCollapsed = sidebar.classList.contains('collapsed');
-                        localStorage.setItem('todoSidebarCollapsed', isCollapsed ? '1' : '0');
-                        menuToggleBtn.textContent = isCollapsed ? '☰ 展開' : '☰ 收合';
-                    });
-                }
-
-                if (sidebarCloseBtn) {
-                    sidebarCloseBtn.addEventListener('click', () => this.closeSidebarOverlay());
-                }
+                this.setupSidebarToggle();
             }
 
             // 收合側欄（手機：關閉 overlay；桌面：收合並記住狀態），供側欄內按鈕與選擇視圖/分類後共用
@@ -5981,24 +5985,32 @@
             // onStep(步驟編號, 說明) 回報進度給解析視窗的進度條
             async _aiRequest(text, onStep = () => {}) {
                 onStep(1, '整理你的描述與既有任務清單');
-                const gen = { responseMimeType: 'application/json', responseJsonSchema: this._aiSchema() };
-                const mkBody = thinkingOff => JSON.stringify({
-                    systemInstruction: { parts: [{ text: this._aiSystemPrompt() }] },
-                    contents: [{ role: 'user', parts: [{ text }] }],
+                // 依序降級：0 關閉思考＋結構化 schema → 1 只留 schema → 2 只要求 JSON（schema 改寫進提示詞）。
+                // Gemini 對不認得的設定只回籠統的 400，故逐級去掉較新的欄位
+                const mkBody = tier => {
+                    const sys = this._aiSystemPrompt() + (tier >= 2
+                        ? '\n\n請只輸出一個 JSON 物件（不要 Markdown 程式碼框），必須符合此 JSON Schema：\n' + JSON.stringify(this._aiSchema())
+                        : '');
+                    const gen = { responseMimeType: 'application/json' };
+                    if (tier <= 1) gen.responseJsonSchema = this._aiSchema();
                     // 結構化抽取不需要深度思考；預設開啟思考是等很久的主因，故關閉
-                    generationConfig: thinkingOff ? { ...gen, thinkingConfig: { thinkingBudget: 0 } } : gen
-                });
+                    if (tier === 0) gen.thinkingConfig = { thinkingBudget: 0 };
+                    return JSON.stringify({
+                        systemInstruction: { parts: [{ text: sys }] },
+                        contents: [{ role: 'user', parts: [{ text }] }],
+                        generationConfig: gen
+                    });
+                };
+                const isKeyErr = d => /API[_ ]key/i.test(d?.error?.message || '');
                 let lastStatus = 0;
                 let timedOut = false;
                 for (const [idx, model] of AI_MODELS.entries()) {
                     onStep(2, idx ? `上一個模型沒有回應，改送出給 ${model}` : `送出給 ${model}`);
                     onStep(3, `等待 ${model} 思考並回覆（最多 ${AI_TIMEOUT_MS / 1000} 秒）`);
-                    let { res, data, timedOut: to } = await this._aiCall(model, mkBody(true));
-                    // 該模型不接受關閉思考的設定：去掉設定重送一次
-                    // （400 訊息常只寫「invalid argument」不提 thinking，故只要不是 API Key 問題就重送）
-                    const isKeyErr = d => /API[_ ]key/i.test(d?.error?.message || '');
-                    if (res && res.status === 400 && !isKeyErr(data)) {
-                        ({ res, data, timedOut: to } = await this._aiCall(model, mkBody(false)));
+                    let { res, data, timedOut: to } = await this._aiCall(model, mkBody(0));
+                    // 400（非 API Key 問題）：逐級降級重送（見 mkBody）
+                    for (let tier = 1; tier <= 2 && res && res.status === 400 && !isKeyErr(data); tier++) {
+                        ({ res, data, timedOut: to } = await this._aiCall(model, mkBody(tier)));
                     }
                     // 仍是 400（模型不支援此請求格式）：換下一個模型，而不是整個中止
                     if (res && res.status === 400 && !isKeyErr(data) && idx < AI_MODELS.length - 1) {
@@ -6025,7 +6037,7 @@
                     if (cand.finishReason === 'MAX_TOKENS') throw new Error('內容太長，請分成幾次輸入');
                     const out = (cand.content?.parts || []).filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
                     let parsed;
-                    try { parsed = JSON.parse(out); } catch (_) { throw new Error('AI 回應格式不正確，請再試一次'); }
+                    try { parsed = JSON.parse(out.trim().replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch (_) { throw new Error('AI 回應格式不正確，請再試一次'); }
                     return Array.isArray(parsed?.tasks) ? parsed.tasks : [];
                 }
                 if (timedOut && !lastStatus) throw new Error(`等了 ${AI_TIMEOUT_MS / 1000} 秒 Gemini 都沒有回應（已試過所有模型），請檢查網路或稍後再試`);
