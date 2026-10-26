@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.7.1 - 任務管理工具</title>
+    <title>TodoMaster v6.8.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -306,6 +306,17 @@
             display: flex;
             flex-direction: column;
         }
+
+        /* 暫停迴圈開關與群組狀態列（v6.8.0） */
+        .pause-switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; vertical-align: middle; }
+        .pause-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .pause-switch .slider { position: absolute; inset: 0; background: var(--bg-tertiary); border: 1px solid var(--border-color, #888); border-radius: 20px; cursor: pointer; transition: background .2s; }
+        .pause-switch .slider::before { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; background: var(--text-secondary); border-radius: 50%; transition: transform .2s; }
+        .pause-switch input:checked + .slider { background: var(--accent-primary); }
+        .pause-switch input:checked + .slider::before { transform: translateX(16px); background: #fff; }
+        .pause-inline { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+        .group-pause-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 14px; margin-bottom: 12px; background: var(--bg-tertiary); border-radius: 8px; font-size: 0.9rem; }
+        .group-pause-bar .gp-info { color: var(--text-secondary); font-size: 0.8rem; flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
 
         .task-list {
             list-style: none;
@@ -1196,7 +1207,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.7.1';
+        const APP_VERSION = 'v6.8.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1494,6 +1505,7 @@
             <!-- 任務區域 -->
             <div class="task-area">
                 <div class="stats-container" id="statsContainer"></div>
+                <div class="group-pause-bar" id="groupPauseBar" hidden></div>
                 <ul class="task-list" id="taskList"></ul>
                 <div class="empty-state" id="emptyState" style="display: none;">
                     <div class="empty-state-icon">🎯</div>
@@ -3804,6 +3816,7 @@
                 const taskList = document.getElementById('taskList');
                 const emptyState = document.getElementById('emptyState');
 
+                this.renderGroupPauseBar();
                 const filtered = this.getFilteredTasks();
                 const query = this.searchQuery.trim();
                 taskList.classList.toggle('searching', !!query);
@@ -4055,6 +4068,8 @@
                                 <div class="task-meta-item">${TIME_META[task.estimatedTime]?.emoji} ${estimatedDisplay}</div>
                                 ${task.actualTime ? `<div class="task-meta-item">✓ ${task.actualTime}分鐘</div>` : ''}
                                 ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : ''}${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
+                                ${task.paused ? '<div class="task-meta-item">⏸ 已暫停</div>' : ''}
+                                ${task.recurring && task.recurring.enabled && !task.groupId && !task.completed ? `<label class="task-meta-item pause-inline" title="暫停迴圈：改為不限期，恢復時排回今天"><span class="pause-switch"><input type="checkbox" class="pause-toggle" ${task.paused ? 'checked' : ''}><span class="slider"></span></span>暫停迴圈</label>` : ''}
                             </div>
                             ${task.nextStepNotes ? `
                                 <div style="margin-top: 8px; padding: 8px; background-color: var(--bg-tertiary); border-radius: 4px; border-left: 3px solid var(--accent-primary); font-size: 0.85rem; color: var(--text-secondary);">
@@ -4086,6 +4101,11 @@
                     `;
 
                 // 添加事件監聽
+                const pauseLabel = li.querySelector('label.pause-inline');
+                if (pauseLabel) {
+                    pauseLabel.addEventListener('click', e => e.stopPropagation());
+                    pauseLabel.querySelector('.pause-toggle').addEventListener('change', e => this.setRecurringPaused('task', task.id, e.target.checked));
+                }
                 const checkbox = li.querySelector('.task-checkbox');
                 checkbox.addEventListener('change', (e) => {
                     e.stopPropagation(); // 防止觸發點擊編輯
@@ -5091,7 +5111,7 @@
 
                     // 依完成日順延：剩餘任務從「完成日 + 本任務間隔」起重新串接
                     const firstActive = activeTasks.find(t => t.recurring && t.recurring.enabled);
-                    if (mode === 'auto' && firstActive) {
+                    if (mode === 'auto' && firstActive && !completedTask.paused) {
                         firstActive.date = addDaysToDate(doneDate, interval);
                         this.updateGroupTaskDates(completedTask.groupId, firstActive.id);
                     }
@@ -5113,6 +5133,16 @@
                     nextDate = addDaysToDate(base, interval);
                 }
 
+                // 暫停中完成：下一次維持不限期（並讓「上次輪到」交棒給群組下一個），不受結束日期檢查影響
+                const wasPaused = !!completedTask.paused;
+                if (wasPaused) {
+                    nextDate = '9999-12-31';
+                    if (activeTasks && completedTask.paused.current) {
+                        const nextCurrent = activeTasks.find(t => t.paused);
+                        if (nextCurrent) nextCurrent.paused = { ...nextCurrent.paused, current: true };
+                    }
+                }
+
                 // 迴圈終止檢查：有「重複次數」時以次數為準（不受結束日期提前卡死）；否則以結束日期為準
                 const rec = completedTask.recurring;
                 const doneCount = rec.completedCount || 0;   // 完成 completedTask 本身即第 (doneCount + 1) 次
@@ -5122,7 +5152,7 @@
                         this.showNotification(`🔁 已完成指定的 ${rec.repeatCount} 次，迴圈結束`);
                         return;
                     }
-                } else if (rec.untilDate && nextDate && nextDate > rec.untilDate) {
+                } else if (!wasPaused && rec.untilDate && nextDate && nextDate > rec.untilDate) {
                     this.showNotification('🔁 已到達迴圈結束日期，不再建立新任務');
                     return;
                 }
@@ -5158,7 +5188,8 @@
                     category: completedTask.category,
                     taskType: completedTask.taskType || 'goal',
                     tags: completedTask.tags ? [...completedTask.tags] : [],
-                    recurring: { ...completedTask.recurring, completedCount: (completedTask.recurring.completedCount || 0) + 1, mode, anchorDate: nextDate || null },
+                    recurring: { ...completedTask.recurring, completedCount: (completedTask.recurring.completedCount || 0) + 1, mode, anchorDate: wasPaused ? null : (nextDate || null) },
+                    paused: wasPaused ? { date: '', current: !completedTask.groupId } : null,
                     groupId: completedTask.groupId || null,
                     groupName: completedTask.groupId ? this.groupDisplayName(completedTask.groupId) : null,
                     groupCycleMode: completedTask.groupCycleMode || 'uniform',
@@ -5535,7 +5566,7 @@
                     tags: '標籤', completed: '完成狀態', completedAt: '完成時間', completedDate: '完成日期', actualTime: '實際用時',
                     timeBalance: '時間收支', nextStepNotes: '下一步', pinned: '釘選', recurring: '迴圈設定',
                     recurringCreated: '已建立下一次', groupId: '群組', groupName: '群組名稱', groupCycleMode: '群組週期',
-                    groupDelayMode: '群組順延', seriesId: '系列'
+                    groupDelayMode: '群組順延', seriesId: '系列', paused: '暫停迴圈'
                 };
                 const fmt = (k, v) => {
                     if (v === undefined || v === null || v === '') return '（空）';
@@ -6824,6 +6855,76 @@
                 activeTasks.forEach(t => this.recomputeRecurringUntil(t));
 
                 this.saveToStorage();
+            }
+
+            // ===== 暫停迴圈（v6.8.0）=====
+            // 暫停 = 日期改為不限期，順序沿用 groupOrder，並以 task.paused = { date: 原日期, current: 是否為上次輪到 } 記錄；
+            // 恢復 = 「上次輪到」的任務排回今天，其餘依原順序與群組週期接續。scope: 'task'（獨立迴圈）／'group'
+            _pausableGroupTasks(groupId) {
+                return this.tasks
+                    .filter(t => t.groupId === groupId && !t.completed && !t.compressed && !isSubtask(t))
+                    .sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
+            }
+
+            isGroupPaused(groupId) {
+                return this._pausableGroupTasks(groupId).some(t => t.paused);
+            }
+
+            setRecurringPaused(scope, id, paused) {
+                const today = localDateStr();
+                if (scope === 'group') {
+                    const tasks = this._pausableGroupTasks(id);
+                    if (tasks.length === 0) return;
+                    if (paused) {
+                        const firstRec = tasks.find(t => t.recurring && t.recurring.enabled) || tasks[0];
+                        tasks.forEach(t => {
+                            t.paused = { date: t.date || '', current: t === firstRec };
+                            t.date = '9999-12-31';
+                        });
+                    } else {
+                        const cur = tasks.find(t => t.paused && t.paused.current && t.recurring && t.recurring.enabled)
+                            || tasks.find(t => t.recurring && t.recurring.enabled);
+                        tasks.forEach(t => {
+                            if (!(t.recurring && t.recurring.enabled) && t.paused) t.date = t.paused.date || '';
+                            delete t.paused;
+                        });
+                        if (cur) {
+                            cur.date = today;
+                            this.updateGroupTaskDates(id, cur.id);
+                        }
+                    }
+                    this.saveToStorage();
+                    this.showNotification(paused ? '⏸ 已暫停群組迴圈（改為不限期）' : '▶️ 已恢復群組迴圈');
+                } else {
+                    const t = this.getTaskById(id);
+                    if (!t) return;
+                    if (paused) {
+                        t.paused = { date: t.date || '', current: true };
+                        t.date = '9999-12-31';
+                    } else {
+                        delete t.paused;
+                        t.date = today;
+                        if (t.recurring) t.recurring.anchorDate = today;
+                        this.recomputeRecurringUntil(t);
+                    }
+                    this.saveToStorage();
+                    this.showNotification(paused ? '⏸ 已暫停迴圈（改為不限期）' : '▶️ 已恢復迴圈，排在今天');
+                }
+                this.updateUI();
+            }
+
+            renderGroupPauseBar() {
+                const bar = document.getElementById('groupPauseBar');
+                if (!bar) return;
+                const groupId = this._filterValue('group');
+                const tasks = groupId !== null ? this._pausableGroupTasks(groupId) : [];
+                if (tasks.length === 0) { bar.hidden = true; bar.innerHTML = ''; return; }
+                const paused = tasks.some(t => t.paused);
+                const cur = paused ? (tasks.find(t => t.paused && t.paused.current) || tasks[0]) : tasks.find(t => t.recurring && t.recurring.enabled) || tasks[0];
+                bar.hidden = false;
+                bar.innerHTML = `<label class="pause-inline"><span class="pause-switch"><input type="checkbox" ${paused ? 'checked' : ''}><span class="slider"></span></span><strong>${paused ? '⏸ 迴圈已暫停' : '暫停迴圈'}</strong></label>
+                    <span class="gp-info">${paused ? '上次輪到' : '目前輪到'}：${escapeHtml(cur.title)}（共 ${tasks.length} 項，順序保留）</span>`;
+                bar.querySelector('input').addEventListener('change', e => this.setRecurringPaused('group', groupId, e.target.checked));
             }
 
             renderGroups() {
