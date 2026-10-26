@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v6.8.1 - 任務管理工具</title>
+    <title>TodoMaster v7.0.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -342,6 +342,42 @@
         .task-item:hover {
             border-color: var(--accent-primary);
             background-color: var(--bg-tertiary);
+        }
+
+        /* 現在執行中（v7.0.0） */
+        .task-item.running {
+            border: 2px solid var(--accent-primary);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 30%, transparent), 0 0 14px color-mix(in srgb, var(--accent-primary) 45%, transparent);
+            position: relative;
+        }
+        .task-item.running::before {
+            content: '▶ 現在執行中';
+            position: absolute;
+            top: -10px; left: 12px;
+            padding: 0 8px;
+            font-size: 11px; font-weight: 600;
+            border-radius: 8px;
+            background: var(--accent-primary);
+            color: #fff;
+        }
+
+        /* 並排按鈕（取代下拉選單，v7.0.0） */
+        .seg-group { display: flex; flex-wrap: wrap; gap: 6px; }
+        .seg-btn {
+            flex: 1 1 auto;
+            padding: 7px 12px;
+            border: 1px solid var(--bg-tertiary);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+        }
+        .seg-btn:hover { border-color: var(--accent-primary); }
+        .seg-btn.active {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: #fff;
         }
 
 
@@ -1208,7 +1244,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v6.8.1';
+        const APP_VERSION = 'v7.0.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1534,8 +1570,8 @@
                 <div class="form-group">
                     <label>預定日期</label>
                     <select id="dateMode" class="form-select">
-                        <option value="scheduled" selected>具體日期</option>
-                        <option value="unscheduled">📥 暫存區（未排程，之後再排）</option>
+                        <option value="scheduled" selected>指定日期</option>
+                        <option value="unscheduled" title="未排程，之後再排">📥 暫存區</option>
                         <option value="unlimited">不限期</option>
                     </select>
                     <div id="dateInputGroup" style="margin-top: 8px;">
@@ -1572,8 +1608,8 @@
                     <label>預計時間</label>
                     <select id="estimatedTime" class="form-select">
                         <option value="10min" selected>10 分鐘內</option>
-                        <option value="30min">30 分鐘 (1 block)</option>
-                        <option value="30plus">多 blocks (超過 30 分鐘)</option>
+                        <option value="30min">30 分鐘</option>
+                        <option value="30plus" title="超過 30 分鐘">多 blocks</option>
                         <option value="non-continuous">非連續</option>
                     </select>
                     <div id="blockSelectGroup" style="display: none; margin-top: 12px;">
@@ -1589,9 +1625,9 @@
                 <div class="form-group">
                     <label>任務類型</label>
                     <select id="taskType" class="form-select">
-                        <option value="accumulative">📈 累積型 — 賺得「實際－預定」</option>
-                        <option value="goal" selected>🎯 任務型 — 提早賺得，超時延遲「預定－實際」</option>
-                        <option value="ahead">⏭️ 超前部署 — 賺得「實際用時」</option>
+                        <option value="accumulative" title="賺得「實際－預定」">📈 累積型</option>
+                        <option value="goal" selected title="提早賺得，超時延遲「預定－實際」">🎯 任務型</option>
+                        <option value="ahead" title="賺得「實際用時」">⏭️ 超前部署</option>
                     </select>
                 </div>
 
@@ -1629,8 +1665,8 @@
                     <div class="form-group">
                         <label>下次日期計算方式</label>
                         <select id="recurringMode" class="form-select">
-                            <option value="fixed" selected>依原定排程（這次延後或重新安排都不影響下次日期；群組：逾期重排不影響後續任務）</option>
-                            <option value="auto">依完成日順延（下次 = 完成日 + 間隔；群組：後續任務一併順延）</option>
+                            <option value="fixed" selected title="這次延後或重新安排都不影響下次日期；群組：逾期重排不影響後續任務">依原定排程</option>
+                            <option value="auto" title="下次 = 完成日 + 間隔；群組：後續任務一併順延">依完成日順延</option>
                         </select>
                     </div>
 
@@ -1672,8 +1708,8 @@
                         <div class="form-group">
                             <label>週期設定方式</label>
                             <select id="groupCycleMode" class="form-select">
-                        <option value="uniform" selected>統一（所有任務間隔相同，改一個自動同步）</option>
-                        <option value="individual">個別設定（各任務自訂天數，依序累加排程）</option>
+                        <option value="uniform" selected title="所有任務間隔相同，改一個自動同步">統一間隔時間</option>
+                        <option value="individual" title="各任務自訂天數，依序累加排程">個別設定</option>
                     </select>
                         </div>
                         <div class="form-group">
@@ -2969,6 +3005,7 @@
                 const collapsed = lsReadJson('todoCollapsedSections', []);
                 this.collapsedSections = new Set(Array.isArray(collapsed) ? collapsed : []);
                 this.currentEditingTask = null;
+                this.runningTaskId = (() => { try { return localStorage.getItem('todoRunningTask') || null; } catch (e) { return null; } })();   // 現在執行中的任務 id（單機介面偏好，不同步）
 
                 this.init();
             }
@@ -3238,6 +3275,8 @@
                 li.className = 'task-item subtask fade-in' + (sub.completed ? ' completed' : '');
                 li.draggable = !!ctx?.isDraggable;
                 li.dataset.taskId = sub.id;
+                if (this.runningTaskId === sub.id && !sub.completed) li.classList.add('running');
+                li.addEventListener('contextmenu', e => { e.preventDefault(); this.toggleRunning(sub.id); });
                 const meta = TIME_META[sub.estimatedTime];
                 const timeText = meta?.label || '';
                 li.innerHTML = `
@@ -3444,6 +3483,7 @@
                 const cur = sel.value || 'career';
                 sel.innerHTML = Object.keys(CATEGORY_META).map(k => `<option value="${escapeHtml(k)}">${escapeHtml(categoryText(k))}</option>`).join('');
                 sel.value = CATEGORY_META[cur] ? cur : 'career';
+                if (sel._segRebuild) sel._segRebuild();
             }
 
             // 編輯視窗一列：kind = categories | groups | tags；key 為 null 代表新增列
@@ -3798,6 +3838,8 @@
 
                     if (this.currentEditingTask && this.currentEditingTask.tags && this.currentEditingTask.tags.includes(tag)) {
                         input.checked = true;
+                    } else if (!this.currentEditingTask && this._prefillTags && this._prefillTags.includes(tag)) {
+                        input.checked = true;
                     }
 
                     label.appendChild(input);
@@ -4016,11 +4058,63 @@
                 return totals;
             }
 
+            // 把 <select> 換成水平並排按鈕：原 select 保留（隱藏）作為資料來源，程式賦值 .value 會自動同步按鈕
+            enhanceSegmented(sel) {
+                const group = document.createElement('div');
+                group.className = 'seg-group';
+                const sync = () => group.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('active', b.dataset.value === sel.value));
+                const build = () => {
+                    group.innerHTML = '';
+                    [...sel.options].forEach(opt => {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'seg-btn';
+                        btn.dataset.value = opt.value;
+                        btn.textContent = opt.textContent;
+                        if (opt.title) btn.title = opt.title;
+                        btn.addEventListener('click', () => {
+                            sel.value = opt.value;
+                            sel.dispatchEvent(new Event('change', { bubbles: true }));
+                        });
+                        group.appendChild(btn);
+                    });
+                    sync();
+                };
+                sel._segRebuild = build;   // 選項動態變動（例：自訂分類）時呼叫以重建按鈕
+                const desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+                Object.defineProperty(sel, 'value', {
+                    get() { return desc.get.call(this); },
+                    set(v) { desc.set.call(this, v); sync(); },
+                    configurable: true
+                });
+                sel.addEventListener('change', sync);
+                sel.style.display = 'none';
+                sel.after(group);
+                build();
+            }
+
+            // 右鍵：開始／停止／切換「現在執行中」
+            toggleRunning(id) {
+                const cur = this.runningTaskId ? this.getTaskById(this.runningTaskId) : null;
+                const alive = cur && !cur.completed;
+                if (alive && cur.id === id) {
+                    this.runningTaskId = null;
+                } else {
+                    if (alive && !confirm(`現在執行「${cur.title}」中，是否切換至另一任務？`)) return;
+                    this.runningTaskId = id;
+                }
+                try { this.runningTaskId ? localStorage.setItem('todoRunningTask', this.runningTaskId) : localStorage.removeItem('todoRunningTask'); } catch (e) {}
+                this.showNotification(this.runningTaskId ? '▶ 已開始執行' : '⏹ 已停止執行');
+                this.renderTasks();
+            }
+
             // 建立單張任務卡 <li>（含 innerHTML 樣板與所有卡片內事件監聽）
             _createTaskCard(task, ctx) {
                 const li = document.createElement('li');
                 li.className = 'task-item fade-in';
                 if (task.completed) li.classList.add('completed');
+                if (this.runningTaskId === task.id && !task.completed) li.classList.add('running');
+                li.addEventListener('contextmenu', e => { e.preventDefault(); this.toggleRunning(task.id); });
 
                 // 群組視圖一律可拖曳；其他視圖依 sortMode
                 if (ctx.isDraggable) {
@@ -4510,6 +4604,28 @@
 
                     // 預設任務類型為 goal
                     document.getElementById('taskType').value = 'goal';
+                    document.getElementById('pinned').value = '';
+                    document.getElementById('category').value = 'career';
+                    document.getElementById('recurringMode').value = 'fixed';
+                    document.getElementById('groupCycleMode').value = 'uniform';
+
+                    // 依目前視圖預填：分類／標籤／群組
+                    const viewCat = this._filterValue('category');
+                    if (viewCat !== null && CATEGORY_META[viewCat]) document.getElementById('category').value = viewCat;
+                    this._prefillTags = this.currentFilter === 'tags' ? [...this.tagFilter] : null;
+                    this.renderTags();   // reset() 後重建標籤勾選並同步摘要（避免殘留上次編輯的顯示）
+                    this._prefillTags = null;
+                    const viewGroup = this._filterValue('group');
+                    if (viewGroup !== null) {
+                        document.getElementById('taskRecurring').checked = true;
+                        document.getElementById('recurringOptions').style.display = 'block';
+                        document.getElementById('taskGroup').checked = true;
+                        document.getElementById('groupOptions').style.display = 'block';
+                        this.updateGroupSelect(null);
+                        const gs = document.getElementById('groupSelect');
+                        gs.value = viewGroup;
+                        if (gs.onchange) gs.onchange();
+                    }
                 });
 
                 // 提交任務表單
@@ -4611,6 +4727,10 @@
 
                 // 快速日期選擇按鈕
                 this.setupQuickDateButtons();
+
+                // 表單下拉選單 → 並排按鈕
+                ['dateMode', 'pinned', 'estimatedTime', 'taskType', 'category', 'recurringMode', 'groupCycleMode']
+                    .forEach(id => this.enhanceSegmented(document.getElementById(id)));
 
                 // 過濾器
                 document.querySelectorAll('.filter-item').forEach(btn => {
@@ -4963,7 +5083,7 @@
                 // 初始化顯示
                 if (currentGroupId) {
                     const groupTasks = this.tasks.filter(t => t.groupId === currentGroupId);
-                    const currentTaskOrder = groupTasks.find(t => t.id === this.currentEditingTask.id)?.groupOrder || 1;
+                    const currentTaskOrder = groupTasks.find(t => t.id === this.currentEditingTask?.id)?.groupOrder || 1;
                     groupOrderDisplay.textContent = `此群組有 ${groupTasks.length} 個任務，當前順序：${currentTaskOrder}`;
                     setGroupModes(groupTasks[0]);
                 } else {
@@ -5875,8 +5995,15 @@
                     onStep(3, `等待 ${model} 思考並回覆（最多 ${AI_TIMEOUT_MS / 1000} 秒）`);
                     let { res, data, timedOut: to } = await this._aiCall(model, mkBody(true));
                     // 該模型不接受關閉思考的設定：去掉設定重送一次
-                    if (res && res.status === 400 && /thinking/i.test(data?.error?.message || '')) {
+                    // （400 訊息常只寫「invalid argument」不提 thinking，故只要不是 API Key 問題就重送）
+                    const isKeyErr = d => /API[_ ]key/i.test(d?.error?.message || '');
+                    if (res && res.status === 400 && !isKeyErr(data)) {
                         ({ res, data, timedOut: to } = await this._aiCall(model, mkBody(false)));
+                    }
+                    // 仍是 400（模型不支援此請求格式）：換下一個模型，而不是整個中止
+                    if (res && res.status === 400 && !isKeyErr(data) && idx < AI_MODELS.length - 1) {
+                        lastStatus = 400;
+                        continue;
                     }
                     if (to) { timedOut = true; continue; }
                     onStep(4, '收到回應，解析 AI 回傳的資料');
