@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.1 - 任務管理工具</title>
+    <title>TodoMaster v7.0.2 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -692,12 +692,27 @@
             color: var(--text-secondary);
             font-size: 0.9rem;
             margin-top: 4px;
-            white-space: pre-wrap;
-            word-wrap: break-word;
+            overflow-wrap: anywhere;
             padding: 8px 10px;
             background-color: var(--bg-tertiary);
             border-radius: 6px;
         }
+        /* 桌面版標題與備註同列，備註最多佔卡片 75%；手機版上下排列不限制 */
+        @media (min-width: 769px) {
+            .task-description { max-width: 75%; }
+        }
+        .task-description > :first-child { margin-top: 0; }
+        .task-description > :last-child { margin-bottom: 0; }
+        .task-description p, .task-description ul, .task-description ol,
+        .task-description blockquote, .task-description pre { margin: 0 0 6px; }
+        .task-description ul, .task-description ol { padding-left: 1.4em; }
+        .task-description h1, .task-description h2, .task-description h3 { margin: 4px 0; font-size: 1em; color: var(--text-primary); }
+        .task-description blockquote { border-left: 3px solid var(--accent-primary); padding-left: 8px; opacity: 0.85; }
+        .task-description code { background: var(--bg-secondary); padding: 0 4px; border-radius: 3px; font-family: monospace; }
+        .task-description pre { background: var(--bg-secondary); padding: 6px 8px; border-radius: 4px; overflow-x: auto; white-space: pre; }
+        .task-description pre code { padding: 0; background: none; }
+        .task-description.collapsed { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 8; line-clamp: 8; overflow: hidden; }
+        .desc-more { background: none; border: none; color: var(--accent-primary); cursor: pointer; padding: 2px 0; font-size: 0.85rem; align-self: flex-start; }
 
         .task-description a.desc-link {
             color: var(--accent-primary);
@@ -1244,7 +1259,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.1';
+        const APP_VERSION = 'v7.0.2';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1367,6 +1382,58 @@
                 const url = trail ? m.slice(0, -trail.length) : m;
                 return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="desc-link">${url}</a>${trail}`;
             });
+        }
+        // 備註 Markdown → 安全 HTML（輕量版：標題、粗斜體、刪除線、行內碼、程式碼區塊、清單、引用、連結；先跳脫再轉換）
+        function renderMarkdown(src) {
+            const inline = s => {
+                const codes = [];
+                s = s.replace(/`([^`\n]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+                s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, (_, t, u) =>
+                    `<a href="${u}" target="_blank" rel="noopener noreferrer" class="desc-link">${t}</a>`);
+                s = s.replace(/(^|[\s(（>])(https?:\/\/[^\s<>"]+)/g, (m, pre, u) => {
+                    const trail = (u.match(/(?:[.,;:!?)\]、，。；：！？）」』]|&#039;|&quot;)+$/) || [''])[0];
+                    const url = trail ? u.slice(0, -trail.length) : u;
+                    return `${pre}<a href="${url}" target="_blank" rel="noopener noreferrer" class="desc-link">${url}</a>${trail}`;
+                });
+                s = s.replace(/\*\*(.+?)\*\*|__(.+?)__/g, (_, a, b) => `<strong>${a || b}</strong>`)
+                     .replace(/~~(.+?)~~/g, '<del>$1</del>')
+                     .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>')
+                     .replace(/(^|[^_\w])_([^_\n]+)_(?![_\w])/g, '$1<em>$2</em>');
+                return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+            };
+            const lines = escapeHtml(src).split('\n');
+            const out = [];
+            let i = 0;
+            while (i < lines.length) {
+                const ln = lines[i];
+                if (/^```/.test(ln)) {
+                    const buf = [];
+                    i++;
+                    while (i < lines.length && !/^```/.test(lines[i])) buf.push(lines[i++]);
+                    i++;
+                    out.push(`<pre><code>${buf.join('\n')}</code></pre>`);
+                } else if (/^\s*$/.test(ln)) {
+                    i++;
+                } else if (/^#{1,6}\s/.test(ln)) {
+                    out.push(`<h3>${inline(ln.replace(/^#+\s+/, ''))}</h3>`);
+                    i++;
+                } else if (/^\s*[-*+]\s+/.test(ln) || /^\s*\d+[.)]\s+/.test(ln)) {
+                    const ordered = /^\s*\d+[.)]\s+/.test(ln);
+                    const re = ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/;
+                    const items = [];
+                    while (i < lines.length && re.test(lines[i])) items.push(`<li>${inline(lines[i++].replace(re, ''))}</li>`);
+                    out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
+                } else if (/^&gt;\s?/.test(ln)) {
+                    const buf = [];
+                    while (i < lines.length && /^&gt;\s?/.test(lines[i])) buf.push(inline(lines[i++].replace(/^&gt;\s?/, '')));
+                    out.push(`<blockquote>${buf.join('<br>')}</blockquote>`);
+                } else {
+                    const buf = [];
+                    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^(```|#{1,6}\s|&gt;|\s*[-*+]\s|\s*\d+[.)]\s)/.test(lines[i])) buf.push(inline(lines[i++]));
+                    out.push(`<p>${buf.join('<br>')}</p>`);
+                }
+            }
+            return out.join('');
         }
         function localDateStr(date = new Date()) {
             return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
@@ -1577,6 +1644,7 @@
                     <div id="dateInputGroup" style="margin-top: 8px;">
                         <input type="date" id="taskDate" style="margin-bottom: 8px;">
                         <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+                            <button type="button" class="btn btn-secondary btn-small" id="yesterdayBtn">昨天</button>
                             <button type="button" class="btn btn-secondary btn-small" id="todayBtn">今天</button>
                             <button type="button" class="btn btn-secondary btn-small" id="tomorrowBtn">明天</button>
                             <button type="button" class="btn btn-secondary btn-small" id="dayAfterBtn">後天</button>
@@ -4156,7 +4224,7 @@
                             ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                         </div>
                         <div class="task-content">
-                            ${task.description ? `<div class="task-description">${linkifyText(task.description)}</div>` : ''}
+                            ${task.description ? `<div class="task-description collapsed">${renderMarkdown(task.description)}</div>` : ''}
                             <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
@@ -4194,6 +4262,24 @@
                             ` : ''}
                         </div>
                     `;
+
+                // 備註超過 8 行才顯示「...更多」（卡片放進 DOM 後才量得到高度）
+                const descEl = li.querySelector('.task-description.collapsed');
+                if (descEl) {
+                    requestAnimationFrame(() => {
+                        if (descEl.scrollHeight <= descEl.clientHeight + 1) { descEl.classList.remove('collapsed'); return; }
+                        const more = document.createElement('button');
+                        more.type = 'button';
+                        more.className = 'desc-more';
+                        more.textContent = '...更多';
+                        more.addEventListener('click', e => {
+                            e.stopPropagation();
+                            const collapsed = descEl.classList.toggle('collapsed');
+                            more.textContent = collapsed ? '...更多' : '收合';
+                        });
+                        descEl.after(more);
+                    });
+                }
 
                 // 添加事件監聽
                 const pauseLabel = li.querySelector('label.pause-inline');
@@ -4318,7 +4404,7 @@
                     if (!e.target.classList.contains('task-block') && e.target !== checkbox
                         && !e.target.classList.contains('reschedule-today-btn')
                         && !e.target.closest('.staging-actions') && !e.target.closest('.subtask-add-btn')
-                        && !e.target.closest('a.desc-link')) {
+                        && !e.target.closest('a.desc-link') && !e.target.closest('.desc-more')) {
                         this.openEditModal(task.id);
                     }
                 });
@@ -4657,6 +4743,19 @@
                         const gs = document.getElementById('groupSelect');
                         gs.value = viewGroup;
                         if (gs.onchange) gs.onchange();
+                        // 新任務排在群組最後：日期＝最後一項日期＋週期（而非預設今天，否則前面的任務全會逾期）
+                        const active = this.tasks
+                            .filter(t => t.groupId === viewGroup && !t.completed && t.recurring && t.recurring.enabled)
+                            .sort((a, b) => (a.groupOrder ?? 0) - (b.groupOrder ?? 0));
+                        const last = active[active.length - 1];
+                        if (last) {
+                            const individual = (active[0].groupCycleMode || 'uniform') === 'individual';
+                            const interval = (individual ? last : active[0]).recurring.interval || 1;
+                            document.getElementById('recurringDays').value = interval;
+                            if (last.date && last.date !== '9999-12-31') {
+                                document.getElementById('taskDate').value = addDaysToDate(last.date, last.recurring.interval || 1);
+                            }
+                        }
                     }
                 });
 
@@ -5505,7 +5604,7 @@
             setupQuickDateButtons() {
                 const setDate = offset => { $('taskDate').value = addDaysToDate(localDateStr(), offset); };
                 // 今天 / 明天 / 後天（點擊時才取「今天」，App 開著跨過午夜也不會錯一天）
-                [['todayBtn', 0], ['tomorrowBtn', 1], ['dayAfterBtn', 2]].forEach(([id, offset]) => {
+                [['yesterdayBtn', -1], ['todayBtn', 0], ['tomorrowBtn', 1], ['dayAfterBtn', 2]].forEach(([id, offset]) => {
                     $(id).onclick = () => setDate(offset);
                 });
                 // 下週一～日：往後最近的那一天（今天是週三按「週三」→ 7 天後）
@@ -5902,7 +6001,7 @@
                     '欄位規則：',
                     '- title：簡短清楚的任務名稱（繁體中文，不含日期時間）。description：補充細節，沒有就空字串。',
                     '- dateMode：有明確日期或相對日期（今天、明天、週五、3天後…）→ "scheduled" 並填 date（YYYY-MM-DD）；說「之後再排」或完全沒提到時間 → "unscheduled"（暫存區），date 為 null；說「沒有期限、長期、有空再做」→ "unlimited"，date 為 null。「週五前」這類期限，date 填該日。',
-                    '- time：有提到時刻或時段就填 HH:MM（24 小時制）。明確時刻照填（下午3點 → 15:00、晚上8點半 → 20:30）；只說時段沒說幾點時用預設：凌晨 01:00、清晨 06:00、早上 08:00、上午 09:00、中午 12:00、下午 13:00、傍晚 17:30、晚上 19:00、深夜 23:00。完全沒提時間才填 null。只有 scheduled 才可填（只提時段但沒提日期時，視為今天，dateMode 填 scheduled）。',
+                    '- time：有提到時刻或時段就填 HH:MM（24 小時制）。明確時刻照填（下午3點 → 15:00、晚上8點半 → 20:30）；只說時段沒說幾點時用預設：凌晨 01:00、清晨 06:00、早上 08:00、上午 09:00、中午 12:00、下午 13:00、傍晚 17:30、晚上 19:00、深夜 23:00。完全沒提時間才填 null。同一段話有多件事、後面的任務沒有各自的時刻時，請依輸入順序接續前一項的結束時間（前一項時刻＋其預估分鐘；例：早上 A 10分鐘、B 10分鐘 → A 08:00、B 08:10），不要全都填同一個時刻。只有 scheduled 才可填（只提時段但沒提日期時，視為今天，dateMode 填 scheduled）。',
                     '- estimatedTime：10 分鐘以內的小事 → "10min"；約 30 分鐘 → "30min"；超過 30 分鐘 → "30plus" 並填 blocks＝所需分鐘數 ÷ 30 無條件進位（至少 2，例：兩小時 → 4）；零碎、分次進行、無法估計連續時間 → "non-continuous"。沒提時長就依常識估計。非 30plus 時 blocks 為 null。',
                     '- category（只能從以下選一個 key）：',
                     `  - "career" ${categoryText('career')}（預設：事業）：工作、上課、讀書、考試、作業、報告、研究、學習技能、求職。凡是學業相關都屬此類。`,
@@ -6073,6 +6172,26 @@
                 };
             }
 
+            // 時間連續性：同日、未指定時刻的任務，接在前一項（有時刻者）結束後（早上 A10min、B10min → 08:00 A、08:10 B）
+            _aiStackTimes(drafts) {
+                let cursor = null;   // { date, min }：下一項可用的起點
+                let prev = null;     // { date, time }：前一項 AI 給的起始時刻（模型常把同時段任務填成同一個預設時刻）
+                for (const d of drafts) {
+                    if (d.dateMode !== 'scheduled' || d.recurring || d.duplicateOf) { cursor = null; continue; }
+                    const orig = d.time;
+                    if ((!d.time || (prev && prev.date === d.date && prev.time === d.time)) && cursor && cursor.date === d.date) {
+                        d.time = minutesToTime(cursor.min);
+                    }
+                    if (!d.time) { cursor = null; continue; }
+                    prev = { date: d.date, time: orig };
+                    const dur = d.estimatedTime === '10min' ? 10 : d.estimatedTime === '30min' ? 30
+                        : d.estimatedTime === '30plus' ? (d.blocks || 2) * BLOCK_MINUTES : 0;
+                    const [h, m] = d.time.split(':').map(Number);
+                    const end = h * 60 + m + dur;
+                    cursor = dur && end < 24 * 60 ? { date: d.date, min: end } : null;
+                }
+            }
+
             // 把 AI 回傳的一筆草稿整理成合法值（白名單欄位、不合法就退回新增表單的預設值）
             normalizeAiDraft(d, srcText = '', single = false) {
                 if (!d || typeof d !== 'object') return null;
@@ -6164,6 +6283,7 @@
                     const raw = await this._aiRequest(text, (n, label) => this._aiProgress(n, label));
                     this._aiProgress(5, '比對既有任務並產生預覽');
                     const drafts = raw.map(d => this.normalizeAiDraft(d, text, raw.length === 1)).filter(Boolean);
+                    this._aiStackTimes(drafts);
                     this.renderAiPreview(drafts);
                     this._aiSetMsg(drafts.length ? `解析出 ${drafts.length} 項任務，確認或微調後按「套用」` : '沒有解析出任務，請換個說法再試', drafts.length ? 'ok' : 'err');
                 } catch (e) {
@@ -6921,7 +7041,9 @@
 
                 // 如果是群組任務，自動計算日期（以剛儲存的任務日期為錨點，避免被其他任務的舊日期覆蓋）
                 if (taskData.groupId && taskData.recurring && taskData.recurring.enabled) {
-                    this.updateGroupTaskDates(taskData.groupId, savedTaskId);
+                    // 新增任務（或換進此群組）不當錨點：既有任務日期不動，新任務依群組週期排在最後
+                    const joinedNew = !this.currentEditingTask || this.currentEditingTask.groupId !== taskData.groupId;
+                    this.updateGroupTaskDates(taskData.groupId, joinedNew ? null : savedTaskId);
                 }
 
                 // 非群組迴圈任務：依「本次日期 + 剩餘次數 × 間隔」校正預定結束日期
