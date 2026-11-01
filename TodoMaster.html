@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.4 - 任務管理工具</title>
+    <title>TodoMaster v7.0.5 -任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -592,7 +592,6 @@
             max-width: 75%;
             margin-left: auto;
         }
-        .task-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
         .task-content .task-meta { justify-content: flex-end; }
         .task-item.info-wrap .task-header { flex-basis: 100%; }
 
@@ -1039,7 +1038,7 @@
             /* 手機：標題一列，其餘資訊換行、靠左、不限寬 */
             .task-header { flex-basis: 100%; }
             .task-content { max-width: 100%; flex-basis: 100%; align-items: flex-start; margin-left: 0; }
-            .task-top, .task-content .task-meta { justify-content: flex-start; }
+            .task-content .task-meta { justify-content: flex-start; }
 
             .modal-content {
                 max-width: 90%;
@@ -1263,7 +1262,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.4';
+        const APP_VERSION = 'v7.0.5';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -4237,7 +4236,8 @@
                             <span class="task-title">${escapeHtml(task.title)}</span>
                         </div>
                         <div class="task-content">
-                            <div class="task-top">
+                            ${task.description ? `<div class="task-description collapsed">${renderMarkdown(task.description)}</div>` : ''}
+                            <div class="task-meta">
                                 <div class="task-badges">
                                     <span class="task-category ${task.category}" style="${categoryStyle(task.category)}">
                                         ${escapeHtml(categoryText(task.category))}
@@ -4248,10 +4248,6 @@
                                         </div>
                                     ` : ''}
                                 </div>
-                                ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
-                            </div>
-                            ${task.description ? `<div class="task-description collapsed">${renderMarkdown(task.description)}</div>` : ''}
-                            <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
                                 <div class="task-meta-item">${TIME_META[task.estimatedTime]?.emoji} ${estimatedDisplay}</div>
@@ -4259,6 +4255,7 @@
                                 ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : ''}${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
                                 ${task.paused ? '<div class="task-meta-item">⏸ 已暫停</div>' : ''}
                                 ${task.recurring && task.recurring.enabled && !task.groupId && !task.completed ? `<label class="task-meta-item pause-inline" title="暫停迴圈：改為不限期，恢復時排回今天"><span class="pause-switch"><input type="checkbox" class="pause-toggle" ${task.paused ? 'checked' : ''}><span class="slider"></span></span>暫停迴圈</label>` : ''}
+                                ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                             </div>
                             ${task.nextStepNotes ? `
                                 <div style="margin-top: 8px; padding: 8px; background-color: var(--bg-tertiary); border-radius: 4px; border-left: 3px solid var(--accent-primary); font-size: 0.85rem; color: var(--text-secondary);">
