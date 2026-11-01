@@ -333,7 +333,7 @@
             padding: 16px;
             transition: all 0.2s;
             display: grid;
-            grid-template-columns: 1fr auto;
+            grid-template-columns: minmax(0, 1fr);
             gap: 12px;
             align-items: start;
             cursor: default;
@@ -617,7 +617,6 @@
             align-items: center;
             flex-wrap: wrap;
             gap: 6px;
-            margin-left: auto;
         }
 
         .task-category {
@@ -697,10 +696,10 @@
             background-color: var(--bg-tertiary);
             border-radius: 6px;
         }
-        /* 桌面版備註靠右，最多佔整張任務卡片寬度的 75%（以卡片為基準，不是備註文字方塊）；手機版不限制 */
+        /* 標題列在上、其餘資訊在下一律靠左；桌面版備註最多佔整張任務卡片寬度的 75%（以卡片為基準）；手機版不限制 */
         @media (min-width: 769px) {
             .task-item { container-type: inline-size; }
-            .task-description { max-width: min(100%, 75cqw); align-self: flex-end; }
+            .task-description { max-width: min(100%, 75cqw); align-self: flex-start; }
         }
         .task-description > :first-child { margin-top: 0; }
         .task-description > :last-child { margin-bottom: 0; }
