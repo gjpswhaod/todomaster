@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.7 - 任務管理工具</title>
+    <title>TodoMaster v7.0.8 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -595,7 +595,8 @@
         .task-content .task-meta { justify-content: flex-end; }
         /* 備註與其他資訊同一水平列；備註夠短就並排，太長則自動換行 */
         .task-chips { display: flex; align-items: center; gap: 6px; }
-        .task-header .task-chips { margin-left: auto; }
+        .task-header .task-chips, .task-header > .task-meta { margin-left: auto; }
+        .task-header > .task-meta { justify-content: flex-end; }
         .task-content .task-progress { align-self: stretch; }
         .task-line { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; max-width: 100%; }
         .task-line .task-description { flex: 0 1 auto; min-width: 0; margin-top: 0; }
@@ -1268,7 +1269,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.7';
+        const APP_VERSION = 'v7.0.8';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1385,19 +1386,36 @@
             const c = li.querySelector(':scope > .task-content');
             if (!c) return;
             li.classList.remove('info-wrap');
-            const chips = li.querySelector('.task-chips'), meta = c.querySelector('.task-meta');
+            const header = li.querySelector(':scope > .task-header');
+            const line = c.querySelector('.task-line');
+            const chips = li.querySelector('.task-chips'), meta = li.querySelector('.task-meta');
+            // 先全部歸位：chips → meta 開頭，meta → 備註列
+            if (meta && meta.parentNode !== line) line.append(meta);
             if (chips && meta && chips.parentNode !== meta) meta.prepend(chips);
+            line.style.display = '';
             if (window.innerWidth <= 768) return;
-            const prev = [c.style.maxWidth, c.style.flex, c.style.marginLeft];
-            c.style.maxWidth = 'none'; c.style.flex = 'none'; c.style.marginLeft = '0';
-            const natural = c.getBoundingClientRect().width;
-            [c.style.maxWidth, c.style.flex, c.style.marginLeft] = prev;
+            const natW = (el, props) => {
+                const prev = Object.keys(props).map(k => el.style[k]);
+                Object.assign(el.style, props);
+                const w = el.getBoundingClientRect().width;
+                Object.keys(props).forEach((k, i) => el.style[k] = prev[i]);
+                return w;
+            };
             const cs = getComputedStyle(li);
             const inner = li.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-            if (natural > inner * 0.75) {
-                li.classList.add('info-wrap');
-                // 資訊換行時，分類／標籤／＋ 移到標題列靠右
-                if (chips) li.querySelector(':scope > .task-header').append(chips);
+            const natural = natW(c, { maxWidth: 'none', flex: 'none', marginLeft: '0' });
+            if (natural <= inner * 0.75) return;          // 放得下：與標題並排
+            li.classList.add('info-wrap');                // 放不下：資訊換到標題下方
+            const gap = 12;
+            const metaW = meta ? natW(meta, { width: 'max-content', flex: 'none' }) : 0;
+            const headW = natW(header, { flex: 'none' });
+            if (meta && metaW <= inner * 0.75 && headW + gap + metaW <= inner) {
+                // 分類／標籤／＋ 與日期時間等維持同一組，整組移到標題列靠右
+                header.append(meta);
+                if (!line.children.length) line.style.display = 'none';
+            } else if (chips) {
+                // 整組放不下標題列：只把分類／標籤／＋ 移到標題列靠右
+                header.append(chips);
             }
         }
         let _fitTimer;
