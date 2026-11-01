@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.8 - 任務管理工具</title>
+    <title>TodoMaster v7.1.0 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -569,6 +569,10 @@
         .subtask-add-btn { background: var(--bg-tertiary); border: 1px solid var(--border-color, #555); color: var(--text-primary); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; line-height: 1; flex-shrink: 0; margin-left: 6px; }
         .subtask-add-btn:hover { background: var(--accent-primary); color: #fff; }
         .task-item.drag-hidden { display: none; }
+        /* 穿插任務（v7.1.0）：縮排一級，跟在 block 任務後方 */
+        .task-item.interleaved { margin-left: 28px; border-left: 3px solid var(--accent-primary); }
+        .task-run-btn { background: var(--bg-tertiary); border: 1px solid var(--border-color, #555); color: var(--text-primary); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; line-height: 1; flex-shrink: 0; margin-left: 6px; padding: 0; font-size: 0.8rem; }
+        .task-run-btn:hover { background: var(--accent-primary); }
         .task-blocks.linked .task-block { pointer-events: none; }
 
         .task-item.completed {
@@ -1269,7 +1273,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.8';
+        const APP_VERSION = 'v7.1.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -3405,8 +3409,11 @@
                         <input type="checkbox" class="task-checkbox" ${sub.completed ? 'checked' : ''}>
                         <span class="task-title" title="點擊改名">${escapeHtml(sub.title)}</span>
                         <span class="subtask-time">${sub.completed && sub.actualTime != null ? `✓ ${sub.actualTime}分鐘` : `${meta?.emoji || ''} ${timeText}`}</span>
+                        ${sub.completed ? '' : `<button type="button" class="task-run-btn subtask-run" title="${this.runningTaskId === sub.id ? '停止執行' : '標示為現在進行中'}">${this.runningTaskId === sub.id ? '⏹' : '▶️'}</button>`}
                         <button type="button" class="subtask-del" title="刪除子任務">✕</button>
                     </div>`;
+                const subRun = li.querySelector('.subtask-run');
+                if (subRun) subRun.addEventListener('click', e => { e.stopPropagation(); this.toggleRunning(sub.id); });
                 const checkbox = li.querySelector('.task-checkbox');
                 checkbox.addEventListener('click', e => e.stopPropagation());
                 checkbox.addEventListener('change', () => {
@@ -3548,6 +3555,19 @@
             groupEmoji(groupId) {
                 const g = this.catalog.groups[groupId];
                 return (g && g.emoji) || '🔁';
+            }
+
+            // 穿插（v7.1.0）：開啟後，群組內未完成任務自動穿插在「所有任務」視圖的 30min／多 blocks 任務後方
+            isGroupInterleave(groupId) {
+                const g = this.catalog.groups[groupId];
+                return !!(g && g.interleave);
+            }
+
+            setGroupInterleave(groupId, on) {
+                this.catalog.groups[groupId] = { ...(this.catalog.groups[groupId] || {}), interleave: !!on, at: this._now() };
+                this.saveToStorage();
+                this.showNotification(on ? '🔀 已開啟穿插' : '已關閉穿插');
+                this.updateUI();
             }
 
             tagText(tag) {
@@ -4010,9 +4030,15 @@
                 const sections = ctx.isSectionView ? this._buildSectionScaffold(ctx) : null;
                 const totals = ctx.isSectionView ? this._computeSectionTotals(ctx) : null;
 
+                const interQueues = new Map();   // groupId → 開啟穿插的未完成任務（已依 groupOrder 排序）
                 filtered.forEach(task => {
                     // 壓縮任務：不顯示卡片，只在時間統計呈現
                     if (task.compressed) return;
+                    if (ctx.isSectionView && task.groupId && !task.completed && !isStagedTask(task) && this.isGroupInterleave(task.groupId)) {
+                        if (!interQueues.has(task.groupId)) interQueues.set(task.groupId, []);
+                        interQueues.get(task.groupId).push(task);
+                        return;
+                    }
                     const li = this._createTaskCard(task, ctx);
                     this._placeCard(li, task, sections, ctx);
                     // 子任務緊接在主任務下方（同一清單）
@@ -4021,12 +4047,61 @@
                         .forEach(sub => li.parentElement.appendChild(this._createSubtaskCard(sub, ctx)));
                 });
 
+                if (interQueues.size) this._placeInterleaved(interQueues, sections, ctx);
+
                 if (ctx.isSectionView) {
                     this._finalizeSections(totals, sections);
                     this._placeNowLine();
                 }
 
                 // dragover / drop 監聽器統一由 setupEventListeners 綁定一次，此處不重複綁定
+            }
+
+            // 穿插（v7.1.0）：依顯示順序掃描各區塊的 30min／多 blocks 任務，每個後方接該群組的下一個穿插任務（一對一，不重複）；
+            // 穿插任務比 block 多時，多出的接在最後一個 block 之後；完全沒有 block 時退回原日期位置
+            _placeInterleaved(queues, sections, ctx) {
+                const lists = [sections.overdue, ...PERIOD_ORDER.map(p => sections.today[p]),
+                    ...PERIOD_ORDER.map(p => sections.tomorrow[p]), ...PERIOD_ORDER.map(p => sections.dayafter[p]), sections.later];
+                const makeCards = task => {
+                    const li = this._createTaskCard(task, ctx);
+                    li.classList.add('interleaved');
+                    li.dataset.interGroup = task.groupId;
+                    const subs = this.getSubtasks(task.id)
+                        .filter(sub => this.showCompleted || !sub.completed)
+                        .map(sub => this._createSubtaskCard(sub, ctx));
+                    return [li, ...subs];
+                };
+                for (const queue of queues.values()) {
+                    queue.sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
+                    let tail = null;   // 最後插入點（節點之後）
+                    const insertAfter = task => {
+                        const nodes = makeCards(task);
+                        nodes.reverse().forEach(n => tail.after(n));
+                    };
+                    const lastOf = li => { let n = li; while (n.nextElementSibling && n.nextElementSibling.classList.contains('subtask')) n = n.nextElementSibling; return n; };
+                    let i = 0;
+                    for (const list of lists) {
+                        if (!list) continue;
+                        const blocks = [...list.children].filter(el => el.classList.contains('task-item') && !el.classList.contains('subtask')
+                            && !el.classList.contains('interleaved') && !el.classList.contains('completed')
+                            && (el.classList.contains('time-30min') || el.classList.contains('time-30plus')));
+                        for (const b of blocks) {
+                            tail = lastOf(b);
+                            if (i < queue.length) { insertAfter(queue[i++]); tail = lastOf(tail.nextElementSibling || tail); }
+                        }
+                        // 區塊內最後一個 block 之後的位置（供多出的穿插任務接尾）
+                        if (blocks.length) { tail = lastOf(blocks[blocks.length - 1]); while (tail.nextElementSibling && tail.nextElementSibling.classList.contains('interleaved')) tail = lastOf(tail.nextElementSibling); }
+                    }
+                    if (i === 0 && !tail) {
+                        queue.forEach(task => {
+                            const nodes = makeCards(task);
+                            this._placeCard(nodes[0], task, sections, ctx);
+                            nodes.slice(1).forEach(n => nodes[0].parentElement.appendChild(n));
+                        });
+                        continue;
+                    }
+                    while (i < queue.length) { insertAfter(queue[i++]); tail = lastOf(tail.nextElementSibling); }
+                }
             }
 
             // 現在時間藍線（v6.5.3）：插在「今天」任務之間；時刻 >= 現在的任務在線下方，其餘（含未指定時刻）在線上方
@@ -4281,6 +4356,7 @@
                                     ` : ''}
                                   </div>
                                   ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
+                                  ${task.completed ? '' : `<button type="button" class="task-run-btn" title="${this.runningTaskId === task.id ? '停止執行' : '標示為現在進行中'}">${this.runningTaskId === task.id ? '⏹' : '▶️'}</button>`}
                                 </div>
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
@@ -4429,6 +4505,12 @@
                     });
                 }
 
+                const runBtn = li.querySelector('.task-run-btn');
+                if (runBtn) runBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    this.toggleRunning(task.id);
+                });
+
                 const addSubBtn = li.querySelector('.subtask-add-btn');
                 if (addSubBtn) addSubBtn.addEventListener('click', e => {
                     e.stopPropagation();
@@ -4561,7 +4643,7 @@
                 if (period === 'unspecified') return null;   // 拖進未指定時間：清除時刻
                 let node = draggingEl.previousElementSibling;
                 while (node) {
-                    if (node.classList.contains('task-item')) {
+                    if (node.classList.contains('task-item') && !node.classList.contains('interleaved')) {
                         const prev = this.getTaskById(node.dataset.taskId);
                         if (prev && prev.time) {
                             return minutesToTime(timeToMinutes(prev.time) + getTaskPlannedMinutes(prev));
@@ -4603,12 +4685,27 @@
                 return shifts.size;
             }
 
+            // 穿插卡被拖放：只依 DOM 中該群組穿插卡的新順序，重新分配這幾張卡原有的 groupOrder，
+            // 不動 block 任務與日期／時刻；重繪後自動恢復 block-穿插-block 排列
+            dropInterleaved(el) {
+                const gid = el.dataset.interGroup;
+                const tasks = [...document.querySelectorAll('#taskList .task-item.interleaved')]
+                    .filter(c => c.dataset.interGroup === gid)
+                    .map(c => this.getTaskById(c.dataset.taskId)).filter(Boolean);
+                const slots = tasks.map(t => t.groupOrder ?? 999).sort((a, b) => a - b);
+                tasks.forEach((t, i) => { t.groupOrder = slots[i]; });
+                this.saveToStorage();
+                this.updateGroupTaskDates(gid);
+                this.showNotification('✅ 穿插順序已更新');
+                this.updateUI();
+            }
+
             saveTaskOrder() {
                 // 三區塊視圖下從各 section list 收集任務
                 const isSectionView = this.currentFilter === 'all' && document.querySelector('.section-task-list');
                 const taskItems = isSectionView
-                    ? document.querySelectorAll('.section-task-list .task-item:not(.subtask)')
-                    : document.querySelectorAll('#taskList .task-item:not(.subtask)');
+                    ? document.querySelectorAll('.section-task-list .task-item:not(.subtask):not(.interleaved)')
+                    : document.querySelectorAll('#taskList .task-item:not(.subtask):not(.interleaved)');
                 const groupId = this._filterValue('group');
                 const isGroupView = groupId !== null;
 
@@ -5015,6 +5112,8 @@
                 document.addEventListener('drop', (e) => {
                     const dragSub = document.querySelector('.task-item.subtask.dragging');
                     if (dragSub) { this.dropSubtask(dragSub); return; }
+                    const dragInter = document.querySelector('.task-item.interleaved.dragging');
+                    if (dragInter) { this.dropInterleaved(dragInter); return; }
                     const canDrop = this.sortMode === 'drag' || this.currentFilter.startsWith('group:');
                     const isSectionView = this.currentFilter === 'all';
 
@@ -5072,7 +5171,8 @@
                             }
                         }
                         this.saveTaskOrder();
-                        if (sectionChanged) this.updateUI();
+                        // 有穿插卡時一律重繪，讓穿插任務跟著 block 任務重新排列
+                        if (sectionChanged || document.querySelector('#taskList .task-item.interleaved')) this.updateUI();
                     } else if (canDrop) {
                         this.saveTaskOrder();
                     }
@@ -7244,9 +7344,12 @@
                 const paused = tasks.some(t => t.paused);
                 const cur = paused ? (tasks.find(t => t.paused && t.paused.current) || tasks[0]) : tasks.find(t => t.recurring && t.recurring.enabled) || tasks[0];
                 bar.hidden = false;
-                bar.innerHTML = `<label class="pause-inline"><span class="pause-switch"><input type="checkbox" ${paused ? 'checked' : ''}><span class="slider"></span></span><strong>${paused ? '⏸ 迴圈已暫停' : '暫停迴圈'}</strong></label>
+                const inter = this.isGroupInterleave(groupId);
+                bar.innerHTML = `<label class="pause-inline"><span class="pause-switch"><input type="checkbox" class="gp-pause" ${paused ? 'checked' : ''}><span class="slider"></span></span><strong>${paused ? '⏸ 迴圈已暫停' : '暫停迴圈'}</strong></label>
+                    <label class="pause-inline" title="開啟後，此群組任務會穿插在 30 分鐘／多 blocks 任務後方"><span class="pause-switch"><input type="checkbox" class="gp-inter" ${inter ? 'checked' : ''}><span class="slider"></span></span><strong>🔀 穿插</strong></label>
                     <span class="gp-info">${paused ? '上次輪到' : '目前輪到'}：${escapeHtml(cur.title)}（共 ${tasks.length} 項，順序保留）</span>`;
-                bar.querySelector('input').addEventListener('change', e => this.setRecurringPaused('group', groupId, e.target.checked));
+                bar.querySelector('.gp-pause').addEventListener('change', e => this.setRecurringPaused('group', groupId, e.target.checked));
+                bar.querySelector('.gp-inter').addEventListener('change', e => this.setGroupInterleave(groupId, e.target.checked));
             }
 
             renderGroups() {
