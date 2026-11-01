@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.1.0 - 任務管理工具</title>
+    <title>TodoMaster v7.1.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -1273,7 +1273,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.1.0';
+        const APP_VERSION = 'v7.1.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -4057,8 +4057,8 @@
                 // dragover / drop 監聽器統一由 setupEventListeners 綁定一次，此處不重複綁定
             }
 
-            // 穿插（v7.1.0）：依顯示順序掃描各區塊的 30min／多 blocks 任務，每個後方接該群組的下一個穿插任務（一對一，不重複）；
-            // 穿插任務比 block 多時，多出的接在最後一個 block 之後；完全沒有 block 時退回原日期位置
+            // 穿插（v7.1.1）：穿插任務記住位置（interPath＝上方卡片 id 由近到遠、interList＝所在清單），
+            // block 完成後仍留在原位；只有無錨點者（新任務、按 ↕️ 重排、錨點全失效）才依 block 一對一配對
             _placeInterleaved(queues, sections, ctx) {
                 const lists = [sections.overdue, ...PERIOD_ORDER.map(p => sections.today[p]),
                     ...PERIOD_ORDER.map(p => sections.tomorrow[p]), ...PERIOD_ORDER.map(p => sections.dayafter[p]), sections.later];
@@ -4066,42 +4066,109 @@
                     const li = this._createTaskCard(task, ctx);
                     li.classList.add('interleaved');
                     li.dataset.interGroup = task.groupId;
+                    const runBtn = li.querySelector('.task-run-btn');
+                    if (runBtn) {
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'task-run-btn task-rearrange-btn';
+                        btn.title = '重新排列穿插任務';
+                        btn.textContent = '↕️';
+                        btn.addEventListener('click', e => { e.stopPropagation(); this.rearrangeInterleaved(task.groupId); });
+                        runBtn.before(btn);
+                    }
                     const subs = this.getSubtasks(task.id)
                         .filter(sub => this.showCompleted || !sub.completed)
                         .map(sub => this._createSubtaskCard(sub, ctx));
                     return [li, ...subs];
                 };
+                const lastOf = li => { let n = li; while (n.nextElementSibling && n.nextElementSibling.classList.contains('subtask')) n = n.nextElementSibling; return n; };
+                // 錨點卡之後已插入的穿插卡也要跳過，新卡接在最後
+                const endOf = li => { let n = lastOf(li); while (n.nextElementSibling && n.nextElementSibling.classList.contains('interleaved')) n = lastOf(n.nextElementSibling); return n; };
+                // 已完成的卡片不當錨點（完成後會沉到清單下方，穿插任務應留在原位）；'HEAD' 代表清單最上方
+                const topCard = (list, id) => [...list.children].find(el => el.classList.contains('task-item') && !el.classList.contains('subtask')
+                    && !el.classList.contains('completed') && el.dataset.taskId === id);
+                const headTails = new Map();
+
                 for (const queue of queues.values()) {
                     queue.sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
-                    let tail = null;   // 最後插入點（節點之後）
-                    const insertAfter = task => {
-                        const nodes = makeCards(task);
-                        nodes.reverse().forEach(n => tail.after(n));
-                    };
-                    const lastOf = li => { let n = li; while (n.nextElementSibling && n.nextElementSibling.classList.contains('subtask')) n = n.nextElementSibling; return n; };
-                    let i = 0;
+                    const loose = [];
+                    // 1) 有錨點者：插在 interPath 中第一個仍存在的卡片之後
+                    for (const task of queue) {
+                        const list = task.interList && lists.find(l => l && l.id === task.interList);
+                        let anchor = null;
+                        if (list && Array.isArray(task.interPath)) {
+                            for (const id of task.interPath) {
+                                if (id === 'HEAD') { anchor = 'HEAD'; break; }
+                                anchor = topCard(list, id); if (anchor) break;
+                            }
+                        }
+                        if (!anchor) { loose.push(task); continue; }
+                        if (anchor === 'HEAD') {
+                            const nodes = makeCards(task);
+                            const prev = headTails.get(list);
+                            if (prev) { let t = prev; nodes.reverse().forEach(n => t.after(n)); }
+                            else list.prepend(...nodes);
+                            headTails.set(list, lastOf(nodes.find(n => !n.classList.contains('subtask'))));
+                            continue;
+                        }
+                        const tail = endOf(anchor);
+                        makeCards(task).reverse().forEach(n => tail.after(n));
+                    }
+                    // 2) 無錨點者：依 block 一對一配對（跳過已有穿插卡跟隨的 block）；多出的接最後一個 block 後
+                    if (!loose.length) continue;
+                    let tail = null, i = 0;
+                    const insertAfter = task => makeCards(task).reverse().forEach(n => tail.after(n));
                     for (const list of lists) {
                         if (!list) continue;
                         const blocks = [...list.children].filter(el => el.classList.contains('task-item') && !el.classList.contains('subtask')
                             && !el.classList.contains('interleaved') && !el.classList.contains('completed')
                             && (el.classList.contains('time-30min') || el.classList.contains('time-30plus')));
                         for (const b of blocks) {
-                            tail = lastOf(b);
-                            if (i < queue.length) { insertAfter(queue[i++]); tail = lastOf(tail.nextElementSibling || tail); }
+                            tail = endOf(b);
+                            const hasFollower = lastOf(b).nextElementSibling?.classList.contains('interleaved');
+                            if (!hasFollower && i < loose.length) insertAfter(loose[i++]);
                         }
-                        // 區塊內最後一個 block 之後的位置（供多出的穿插任務接尾）
-                        if (blocks.length) { tail = lastOf(blocks[blocks.length - 1]); while (tail.nextElementSibling && tail.nextElementSibling.classList.contains('interleaved')) tail = lastOf(tail.nextElementSibling); }
+                        if (blocks.length) tail = endOf(blocks[blocks.length - 1]);
                     }
                     if (i === 0 && !tail) {
-                        queue.forEach(task => {
+                        loose.forEach(task => {
                             const nodes = makeCards(task);
                             this._placeCard(nodes[0], task, sections, ctx);
                             nodes.slice(1).forEach(n => nodes[0].parentElement.appendChild(n));
                         });
                         continue;
                     }
-                    while (i < queue.length) { insertAfter(queue[i++]); tail = lastOf(tail.nextElementSibling); }
+                    while (i < loose.length) insertAfter(loose[i++]);
                 }
+                this._saveInterleavePaths();
+            }
+
+            // 依目前 DOM 排列記錄每張穿插卡的錨點（僅在變動時寫入）
+            _saveInterleavePaths() {
+                let dirty = false;
+                document.querySelectorAll('#taskList .task-item.interleaved').forEach(li => {
+                    const task = this.getTaskById(li.dataset.taskId);
+                    const list = li.parentElement;
+                    if (!task || !list) return;
+                    const path = [];
+                    let n = li.previousElementSibling;
+                    for (; n && path.length < 8; n = n.previousElementSibling) {
+                        if (n.classList.contains('task-item') && !n.classList.contains('subtask') && !n.classList.contains('completed') && n.dataset.taskId) path.push(n.dataset.taskId);
+                    }
+                    if (!n) path.push('HEAD');
+                    if (task.interList !== list.id || JSON.stringify(task.interPath || []) !== JSON.stringify(path)) {
+                        task.interPath = path; task.interList = list.id; dirty = true;
+                    }
+                });
+                if (dirty) this.saveToStorage();
+            }
+
+            // ↕️：清除該群組穿插任務的記憶位置，依 block 重新配對
+            rearrangeInterleaved(groupId) {
+                this.tasks.forEach(t => { if (t.groupId === groupId) { delete t.interPath; delete t.interList; } });
+                this.saveToStorage();
+                this.showNotification('↕️ 已重新排列穿插任務');
+                this.updateUI();
             }
 
             // 現在時間藍線（v6.5.3）：插在「今天」任務之間；時刻 >= 現在的任務在線下方，其餘（含未指定時刻）在線上方
@@ -4694,6 +4761,7 @@
                     .map(c => this.getTaskById(c.dataset.taskId)).filter(Boolean);
                 const slots = tasks.map(t => t.groupOrder ?? 999).sort((a, b) => a - b);
                 tasks.forEach((t, i) => { t.groupOrder = slots[i]; });
+                this.tasks.forEach(t => { if (t.groupId === gid) { delete t.interPath; delete t.interList; } });
                 this.saveToStorage();
                 this.updateGroupTaskDates(gid);
                 this.showNotification('✅ 穿插順序已更新');
