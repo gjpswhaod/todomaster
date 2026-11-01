@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.6 - 任務管理工具</title>
+    <title>TodoMaster v7.0.7 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -594,6 +594,9 @@
         }
         .task-content .task-meta { justify-content: flex-end; }
         /* 備註與其他資訊同一水平列；備註夠短就並排，太長則自動換行 */
+        .task-chips { display: flex; align-items: center; gap: 6px; }
+        .task-header .task-chips { margin-left: auto; }
+        .task-content .task-progress { align-self: stretch; }
         .task-line { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px 12px; max-width: 100%; }
         .task-line .task-description { flex: 0 1 auto; min-width: 0; margin-top: 0; }
         .task-item.info-wrap .task-header { flex-basis: 100%; }
@@ -1265,7 +1268,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.6';
+        const APP_VERSION = 'v7.0.7';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1382,6 +1385,8 @@
             const c = li.querySelector(':scope > .task-content');
             if (!c) return;
             li.classList.remove('info-wrap');
+            const chips = li.querySelector('.task-chips'), meta = c.querySelector('.task-meta');
+            if (chips && meta && chips.parentNode !== meta) meta.prepend(chips);
             if (window.innerWidth <= 768) return;
             const prev = [c.style.maxWidth, c.style.flex, c.style.marginLeft];
             c.style.maxWidth = 'none'; c.style.flex = 'none'; c.style.marginLeft = '0';
@@ -1389,7 +1394,11 @@
             [c.style.maxWidth, c.style.flex, c.style.marginLeft] = prev;
             const cs = getComputedStyle(li);
             const inner = li.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-            if (natural > inner * 0.75) li.classList.add('info-wrap');
+            if (natural > inner * 0.75) {
+                li.classList.add('info-wrap');
+                // 資訊換行時，分類／標籤／＋ 移到標題列靠右
+                if (chips) li.querySelector(':scope > .task-header').append(chips);
+            }
         }
         let _fitTimer;
         window.addEventListener('resize', () => {
@@ -4242,7 +4251,8 @@
                             <div class="task-line">
                             ${task.description ? `<div class="task-description collapsed">${renderMarkdown(task.description)}</div>` : ''}
                             <div class="task-meta">
-                                <div class="task-badges">
+                                <div class="task-chips">
+                                  <div class="task-badges">
                                     <span class="task-category ${task.category}" style="${categoryStyle(task.category)}">
                                         ${escapeHtml(categoryText(task.category))}
                                     </span>
@@ -4251,6 +4261,8 @@
                                             ${task.tags.map(tag => `<span class="task-tag">${escapeHtml(this.tagText(tag))}</span>`).join('')}
                                         </div>
                                     ` : ''}
+                                  </div>
+                                  ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                                 </div>
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
@@ -4259,7 +4271,6 @@
                                 ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : ''}${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
                                 ${task.paused ? '<div class="task-meta-item">⏸ 已暫停</div>' : ''}
                                 ${task.recurring && task.recurring.enabled && !task.groupId && !task.completed ? `<label class="task-meta-item pause-inline" title="暫停迴圈：改為不限期，恢復時排回今天"><span class="pause-switch"><input type="checkbox" class="pause-toggle" ${task.paused ? 'checked' : ''}><span class="slider"></span></span>暫停迴圈</label>` : ''}
-                                ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                             </div>
                             </div>
                             ${task.nextStepNotes ? `
