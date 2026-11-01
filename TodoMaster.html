@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.2 - 任務管理工具</title>
+    <title>TodoMaster v7.0.3 -任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -697,9 +697,10 @@
             background-color: var(--bg-tertiary);
             border-radius: 6px;
         }
-        /* 桌面版標題與備註同列，備註最多佔卡片 75%；手機版上下排列不限制 */
+        /* 桌面版備註靠右，最多佔整張任務卡片寬度的 75%（以卡片為基準，不是備註文字方塊）；手機版不限制 */
         @media (min-width: 769px) {
-            .task-description { max-width: 75%; }
+            .task-item { container-type: inline-size; }
+            .task-description { max-width: min(100%, 75cqw); align-self: flex-end; }
         }
         .task-description > :first-child { margin-top: 0; }
         .task-description > :last-child { margin-bottom: 0; }
@@ -1259,7 +1260,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.2';
+        const APP_VERSION = 'v7.0.3';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
