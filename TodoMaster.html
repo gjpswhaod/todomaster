@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.0.3 -任務管理工具</title>
+    <title>TodoMaster v7.0.4 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -332,10 +332,11 @@
             border-radius: 8px;
             padding: 16px;
             transition: all 0.2s;
-            display: grid;
-            grid-template-columns: minmax(0, 1fr);
-            gap: 12px;
-            align-items: start;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 8px 12px;
+            align-items: flex-start;
             cursor: default;
         }
 
@@ -552,7 +553,7 @@
         .task-item.subtask {
             margin-left: 28px;
             padding: 8px 12px;
-            grid-template-columns: 1fr;
+            display: block;
             border-left: 3px solid var(--accent-primary);
         }
         .ai-dup { color: #f59f00; font-weight: 600; }
@@ -579,18 +580,29 @@
             color: var(--text-secondary);
         }
 
+        /* 標題在左；標題以外的資訊（分類、備註、時間…）整塊靠右，最多佔卡片 75% 寬。
+           放得下就與標題並排，放不下（JS 量測後加上 info-wrap）就換到標題下一行 */
         .task-content {
             display: flex;
             flex-direction: column;
+            align-items: flex-end;
             gap: 8px;
             min-width: 0;
+            flex: 0 1 auto;
+            max-width: 75%;
+            margin-left: auto;
         }
+        .task-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+        .task-content .task-meta { justify-content: flex-end; }
+        .task-item.info-wrap .task-header { flex-basis: 100%; }
 
         .task-header {
             display: flex;
             align-items: center;
             gap: 12px;
             flex-wrap: wrap;
+            flex: 1 1 auto;
+            min-width: 0;
         }
 
         .task-checkbox {
@@ -695,11 +707,6 @@
             padding: 8px 10px;
             background-color: var(--bg-tertiary);
             border-radius: 6px;
-        }
-        /* 標題列在上、其餘資訊在下一律靠左；桌面版備註最多佔整張任務卡片寬度的 75%（以卡片為基準）；手機版不限制 */
-        @media (min-width: 769px) {
-            .task-item { container-type: inline-size; }
-            .task-description { max-width: min(100%, 75cqw); align-self: flex-start; }
         }
         .task-description > :first-child { margin-top: 0; }
         .task-description > :last-child { margin-bottom: 0; }
@@ -1029,13 +1036,10 @@
                 max-width: none;
             }
 
-            .task-item {
-                grid-template-columns: 1fr;
-            }
-
-            .task-badges {
-                margin-left: 0;
-            }
+            /* 手機：標題一列，其餘資訊換行、靠左、不限寬 */
+            .task-header { flex-basis: 100%; }
+            .task-content { max-width: 100%; flex-basis: 100%; align-items: flex-start; margin-left: 0; }
+            .task-top, .task-content .task-meta { justify-content: flex-start; }
 
             .modal-content {
                 max-width: 90%;
@@ -1259,7 +1263,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.0.3';
+        const APP_VERSION = 'v7.0.4';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1371,6 +1375,26 @@
 
         const $ = id => document.getElementById(id);
         // 任意值 → 可安全放進 innerHTML 的字串（null/undefined 視為空字串）
+        // 桌面版：標題以外資訊的自然（不換行）寬度超過卡片內容寬 75% → 加 info-wrap，資訊換到標題下一行
+        function fitTaskInfo(li) {
+            const c = li.querySelector(':scope > .task-content');
+            if (!c) return;
+            li.classList.remove('info-wrap');
+            if (window.innerWidth <= 768) return;
+            const prev = [c.style.maxWidth, c.style.flex, c.style.marginLeft];
+            c.style.maxWidth = 'none'; c.style.flex = 'none'; c.style.marginLeft = '0';
+            const natural = c.getBoundingClientRect().width;
+            [c.style.maxWidth, c.style.flex, c.style.marginLeft] = prev;
+            const cs = getComputedStyle(li);
+            const inner = li.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+            if (natural > inner * 0.75) li.classList.add('info-wrap');
+        }
+        let _fitTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(_fitTimer);
+            _fitTimer = setTimeout(() => document.querySelectorAll('.task-item:not(.subtask)').forEach(fitTaskInfo), 150);
+        });
+
         function escapeHtml(v) {
             const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
             return String(v ?? '').replace(/[&<>"']/g, m => map[m]);
@@ -4211,19 +4235,21 @@
                             <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
                             ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
                             <span class="task-title">${escapeHtml(task.title)}</span>
-                            <div class="task-badges">
-                                <span class="task-category ${task.category}" style="${categoryStyle(task.category)}">
-                                    ${escapeHtml(categoryText(task.category))}
-                                </span>
-                                ${task.tags && task.tags.length > 0 ? `
-                                    <div class="task-tags">
-                                        ${task.tags.map(tag => `<span class="task-tag">${escapeHtml(this.tagText(tag))}</span>`).join('')}
-                                    </div>
-                                ` : ''}
-                            </div>
-                            ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                         </div>
                         <div class="task-content">
+                            <div class="task-top">
+                                <div class="task-badges">
+                                    <span class="task-category ${task.category}" style="${categoryStyle(task.category)}">
+                                        ${escapeHtml(categoryText(task.category))}
+                                    </span>
+                                    ${task.tags && task.tags.length > 0 ? `
+                                        <div class="task-tags">
+                                            ${task.tags.map(tag => `<span class="task-tag">${escapeHtml(this.tagText(tag))}</span>`).join('')}
+                                        </div>
+                                    ` : ''}
+                                </div>
+                                ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
+                            </div>
                             ${task.description ? `<div class="task-description collapsed">${renderMarkdown(task.description)}</div>` : ''}
                             <div class="task-meta">
                                 ${task.date ? `<div class="task-meta-item">📅 ${task.date}${dueStatus.label ? ` <span style="color: ${dueStatus.color}">${dueStatus.label}</span>` : ''}</div>` : ''}
@@ -4262,6 +4288,9 @@
                             ` : ''}
                         </div>
                     `;
+
+                // 標題以外的資訊自然寬度超過卡片 75% 時換行到標題下方（放進 DOM 後才量得到寬度）
+                requestAnimationFrame(() => fitTaskInfo(li));
 
                 // 備註超過 8 行才顯示「...更多」（卡片放進 DOM 後才量得到高度）
                 const descEl = li.querySelector('.task-description.collapsed');
