@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.1.1 - 任務管理工具</title>
+    <title>TodoMaster v7.2.1 - 任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -573,6 +573,10 @@
         .task-item.interleaved { margin-left: 28px; border-left: 3px solid var(--accent-primary); }
         .task-run-btn { background: var(--bg-tertiary); border: 1px solid var(--border-color, #555); color: var(--text-primary); border-radius: 6px; width: 26px; height: 26px; cursor: pointer; line-height: 1; flex-shrink: 0; margin-left: 6px; padding: 0; font-size: 0.8rem; }
         .task-run-btn:hover { background: var(--accent-primary); }
+        .intensity-switch { display: inline-flex; border: 1px solid var(--border-color, #555); border-radius: 6px; overflow: hidden; margin-left: 6px; flex-shrink: 0; }
+        .intensity-btn { background: var(--bg-tertiary); color: var(--text-secondary); border: none; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; }
+        .intensity-btn + .intensity-btn { border-left: 1px solid var(--border-color, #555); }
+        .intensity-btn.active { background: var(--accent-primary); color: #fff; }
         .task-blocks.linked .task-block { pointer-events: none; }
 
         .task-item.completed {
@@ -1273,7 +1277,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.1.1';
+        const APP_VERSION = 'v7.2.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1427,6 +1431,17 @@
             clearTimeout(_fitTimer);
             _fitTimer = setTimeout(() => document.querySelectorAll('.task-item:not(.subtask)').forEach(fitTaskInfo), 150);
         });
+
+        const INTENSITY_LEVELS = ['min', 'normal', 'high'];
+        const INTENSITY_LABEL = { min: '🆘 救命版', normal: '普通版', high: '🔥 高強度' };
+        // 取得任務目前強度對應的名稱／備註（普通版即 task.title/description）
+        function getActiveVariant(task) {
+            if (task.intensityEnabled && task.intensity && task.intensity !== 'normal') {
+                const v = (task.variants || {})[task.intensity] || {};
+                return { title: v.title || task.title, description: v.description || '' };
+            }
+            return { title: task.title, description: task.description };
+        }
 
         function escapeHtml(v) {
             const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
@@ -1689,6 +1704,25 @@
                 <div class="form-group">
                     <label>備註</label>
                     <textarea id="taskDescription" placeholder="添加更多詳情..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="taskIntensity">
+                        強度選擇（卡片可切換 救命版／普通版／高強度）
+                    </label>
+                </div>
+                <div id="intensityOptions" style="display: none;">
+                    <div class="form-group">
+                        <label>🆘 救命版 名稱（上方為普通版）</label>
+                        <input type="text" id="variantMinTitle" placeholder="最小可做的版本">
+                        <textarea id="variantMinDesc" placeholder="救命版備註..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>🔥 高強度 名稱</label>
+                        <input type="text" id="variantHighTitle" placeholder="高專注版本">
+                        <textarea id="variantHighDesc" placeholder="高強度備註..."></textarea>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -3877,7 +3911,9 @@
                 const q = this.searchQuery.trim().toLowerCase();
                 if (q) {
                     filtered = filtered.filter(t => String(t.title || '').toLowerCase().includes(q)
-                        || String(t.description || '').toLowerCase().includes(q));
+                        || String(t.description || '').toLowerCase().includes(q)
+                        || (t.intensityEnabled && Object.values(t.variants || {}).some(v =>
+                            String(v.title || '').toLowerCase().includes(q) || String(v.description || '').toLowerCase().includes(q))));
                 }
 
                 if (!this.showCompleted) {
@@ -4401,15 +4437,16 @@
                     estimatedDisplay = `${task.blocks} blocks (${task.blocks * BLOCK_MINUTES}分鐘)`;
                 }
 
+                const active = getActiveVariant(task);
                 li.innerHTML = `
                         <div class="task-header">
                             <input type="checkbox" class="task-checkbox" ${task.completed ? 'checked' : ''}>
                             ${task.pinned ? `<span class="task-pin-icon" title="${task.pinned === 'top' ? '已置頂' : '已置底'}">📌</span>` : ''}
-                            <span class="task-title">${escapeHtml(task.title)}</span>
+                            <span class="task-title">${escapeHtml(active.title)}</span>
                         </div>
                         <div class="task-content">
                             <div class="task-line">
-                            ${task.description ? `<div class="task-description collapsed">${renderMarkdown(task.description)}</div>` : ''}
+                            ${active.description ? `<div class="task-description collapsed">${renderMarkdown(active.description)}</div>` : ''}
                             <div class="task-meta">
                                 <div class="task-chips">
                                   <div class="task-badges">
@@ -4422,6 +4459,7 @@
                                         </div>
                                     ` : ''}
                                   </div>
+                                  ${task.intensityEnabled && !task.completed ? `<span class="intensity-switch" title="切換強度">${INTENSITY_LEVELS.map(l => `<button type="button" class="intensity-btn${(task.intensity || 'normal') === l ? ' active' : ''}" data-level="${l}">${INTENSITY_LABEL[l]}</button>`).join('')}</span>` : ''}
                                   ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                                   ${task.completed ? '' : `<button type="button" class="task-run-btn" title="${this.runningTaskId === task.id ? '停止執行' : '標示為現在進行中'}">${this.runningTaskId === task.id ? '⏹' : '▶️'}</button>`}
                                 </div>
@@ -4578,6 +4616,12 @@
                     this.toggleRunning(task.id);
                 });
 
+                li.querySelectorAll('.intensity-btn').forEach(btn => btn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    this.updateTask(task.id, { intensity: btn.dataset.level });
+                    this.updateUI();
+                }));
+
                 const addSubBtn = li.querySelector('.subtask-add-btn');
                 if (addSubBtn) addSubBtn.addEventListener('click', e => {
                     e.stopPropagation();
@@ -4612,7 +4656,7 @@
                 li.addEventListener('click', (e) => {
                     if (!e.target.classList.contains('task-block') && e.target !== checkbox
                         && !e.target.classList.contains('reschedule-today-btn')
-                        && !e.target.closest('.staging-actions') && !e.target.closest('.subtask-add-btn')
+                        && !e.target.closest('.staging-actions') && !e.target.closest('.subtask-add-btn') && !e.target.closest('.intensity-switch')
                         && !e.target.closest('a.desc-link') && !e.target.closest('.desc-more')) {
                         this.openEditModal(task.id);
                     }
@@ -4931,6 +4975,8 @@
                     document.getElementById('nextStepNotesGroup').style.display = 'none';
                     document.getElementById('taskRecurring').checked = false;
                     document.getElementById('recurringOptions').style.display = 'none';
+                    document.getElementById('taskIntensity').checked = false;
+                    document.getElementById('intensityOptions').style.display = 'none';
                     document.getElementById('taskGroup').checked = false;
                     document.getElementById('groupOptions').style.display = 'none';
 
@@ -5006,6 +5052,9 @@
                 document.getElementById('blockSelect').addEventListener('input', updateBlockCalc);
 
                 // 遞迴選項
+                document.getElementById('taskIntensity').addEventListener('change', (e) => {
+                    document.getElementById('intensityOptions').style.display = e.target.checked ? 'block' : 'none';
+                });
                 document.getElementById('taskRecurring').addEventListener('change', (e) => {
                     document.getElementById('recurringOptions').style.display = e.target.checked ? 'block' : 'none';
                 });
@@ -5284,6 +5333,13 @@
                 const task = this.currentEditingTask;
                 document.getElementById('taskTitle').value = task.title;
                 document.getElementById('taskDescription').value = task.description || '';
+                const _v = task.variants || {};
+                document.getElementById('taskIntensity').checked = !!task.intensityEnabled;
+                document.getElementById('intensityOptions').style.display = task.intensityEnabled ? 'block' : 'none';
+                document.getElementById('variantMinTitle').value = (_v.min && _v.min.title) || '';
+                document.getElementById('variantMinDesc').value = (_v.min && _v.min.description) || '';
+                document.getElementById('variantHighTitle').value = (_v.high && _v.high.title) || '';
+                document.getElementById('variantHighDesc').value = (_v.high && _v.high.description) || '';
 
                 // 設置日期模式
                 let dateMode = 'scheduled';
@@ -5648,7 +5704,10 @@
                     groupOrder: newGroupOrder,
                     actualTime: null,
                     nextStepNotes: null,
-                    pinned: completedTask.pinned || null
+                    pinned: completedTask.pinned || null,
+                    intensityEnabled: !!completedTask.intensityEnabled,
+                    intensity: 'normal',
+                    variants: completedTask.variants ? JSON.parse(JSON.stringify(completedTask.variants)) : null
                 };
 
                 // 有「重複次數」時，依新一次的日期把預定結束日期校正為「涵蓋到做滿總次數」
@@ -6016,7 +6075,7 @@
                     title: '名稱', description: '備註', date: '日期', time: '時刻', category: '分類', taskType: '任務類型',
                     estimatedTime: '預計時間', blocks: 'Block 數', completedBlocks: '已完成 Block', blockTimes: 'Block 用時',
                     tags: '標籤', completed: '完成狀態', completedAt: '完成時間', completedDate: '完成日期', actualTime: '實際用時',
-                    timeBalance: '時間收支', nextStepNotes: '下一步', pinned: '釘選', recurring: '迴圈設定',
+                    timeBalance: '時間收支', nextStepNotes: '下一步', pinned: '釘選', recurring: '迴圈設定', intensityEnabled: '強度選擇', intensity: '目前強度', variants: '強度版本',
                     recurringCreated: '已建立下一次', groupId: '群組', groupName: '群組名稱', groupCycleMode: '群組週期',
                     groupDelayMode: '群組順延', seriesId: '系列', paused: '暫停迴圈'
                 };
@@ -7168,7 +7227,12 @@
                     groupOrder: null,
                     actualTime: document.getElementById('actualTime').value ? parseInt(document.getElementById('actualTime').value) : null,
                     nextStepNotes: null,
-                    pinned: document.getElementById('pinned').value || null
+                    pinned: document.getElementById('pinned').value || null,
+                    intensityEnabled: document.getElementById('taskIntensity').checked,
+                    variants: {
+                        min: { title: document.getElementById('variantMinTitle').value.trim(), description: document.getElementById('variantMinDesc').value.trim() },
+                        high: { title: document.getElementById('variantHighTitle').value.trim(), description: document.getElementById('variantHighDesc').value.trim() }
+                    }
                 };
 
                 if (document.getElementById('taskRecurring').checked) {
