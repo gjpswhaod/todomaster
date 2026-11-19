@@ -327,6 +327,7 @@ README：版本歷史只加近期詳列，並把最舊的詳列項目濃縮成�
 - [ ] 確保未引入新的 console 錯誤
 - [ ] 更新 README 版本號
 - [ ] `<title>`、`APP_VERSION`、`sw.js` 的 `CACHE_NAME` 三者版本一致（`sw.js` 位元組改變才會觸發手機 PWA 更新）
+- [ ] 本機跑 `node .github/scripts/check.mjs` 通過（GitHub Actions 每次推到 master 或開 PR 也會自動跑同一套：JS 語法、manifest.json、三處版本一致）
 - [ ] 在 `backups/` 建立更新日誌
 - [ ] 向使用者提供完整的變更報告
 
