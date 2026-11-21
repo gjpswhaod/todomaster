@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.2.1 - 任務管理工具</title>
+    <title>TodoMaster v7.2.2 -任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -577,6 +577,7 @@
         .intensity-btn { background: var(--bg-tertiary); color: var(--text-secondary); border: none; padding: 2px 8px; font-size: 0.75rem; cursor: pointer; }
         .intensity-btn + .intensity-btn { border-left: 1px solid var(--border-color, #555); }
         .intensity-btn.active { background: var(--accent-primary); color: #fff; }
+        .intensity-btn { white-space: nowrap; }
         .task-blocks.linked .task-block { pointer-events: none; }
 
         .task-item.completed {
@@ -1277,7 +1278,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.2.1';
+        const APP_VERSION = 'v7.2.2';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -4459,7 +4460,7 @@
                                         </div>
                                     ` : ''}
                                   </div>
-                                  ${task.intensityEnabled && !task.completed ? `<span class="intensity-switch" title="切換強度">${INTENSITY_LEVELS.map(l => `<button type="button" class="intensity-btn${(task.intensity || 'normal') === l ? ' active' : ''}" data-level="${l}">${INTENSITY_LABEL[l]}</button>`).join('')}</span>` : ''}
+                                  ${task.intensityEnabled && !task.completed ? `<span class="intensity-switch" title="點擊切換強度（普通→高強度→救命）"><button type="button" class="intensity-btn active" data-level="${task.intensity || 'normal'}">${INTENSITY_LABEL[task.intensity || 'normal']}</button></span>` : ''}
                                   ${task.completed ? '' : '<button type="button" class="subtask-add-btn" title="新增子任務">＋</button>'}
                                   ${task.completed ? '' : `<button type="button" class="task-run-btn" title="${this.runningTaskId === task.id ? '停止執行' : '標示為現在進行中'}">${this.runningTaskId === task.id ? '⏹' : '▶️'}</button>`}
                                 </div>
@@ -4618,7 +4619,9 @@
 
                 li.querySelectorAll('.intensity-btn').forEach(btn => btn.addEventListener('click', e => {
                     e.stopPropagation();
-                    this.updateTask(task.id, { intensity: btn.dataset.level });
+                    const order = ['normal', 'high', 'min'];
+                    const cur = order.includes(task.intensity) ? task.intensity : 'normal';
+                    this.updateTask(task.id, { intensity: order[(order.indexOf(cur) + 1) % order.length] });
                     this.updateUI();
                 }));
 
