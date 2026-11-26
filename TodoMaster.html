@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v7.2.2 -任務管理工具</title>
+    <title>TodoMaster v8.0.0 -任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -135,6 +135,79 @@
             color: var(--bg-primary);
             border-color: var(--accent-primary);
         }
+
+
+        /* ===== 時鐘視圖／日曆視圖（v8.0.0）===== */
+        .special-view[hidden] { display: none; }
+        .clock-view, .cal-view { max-width: 900px; margin: 0 auto; }
+        .cv-summary { background: var(--bg-secondary); border-radius: 10px; padding: 12px 16px; margin-bottom: 14px; }
+        .cv-now { font-size: 1.3rem; font-weight: 700; margin-bottom: 6px; }
+        .cv-stats { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 0.9rem; color: var(--text-secondary); }
+        .cv-stats strong { color: var(--text-primary); }
+        .cv-stats .cv-pos strong { color: #34d399; }
+        .cv-stats .cv-neg strong { color: #ff6b6b; }
+        .cv-next { margin-top: 8px; font-size: 0.9rem; }
+        .clock-faces { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; margin-bottom: 14px; }
+        .clock-face { flex: 1 1 260px; max-width: 380px; background: var(--bg-secondary); border-radius: 12px; padding: 10px; border: 2px solid transparent; }
+        .clock-face.current { border-color: var(--accent-primary); }
+        .clock-face-title { text-align: center; font-weight: 600; margin-bottom: 4px; font-size: 0.95rem; }
+        .clock-svg { width: 100%; height: auto; display: block; }
+        .clock-bg { fill: var(--bg-tertiary); }
+        .clock-past { fill: #000; opacity: 0.35; }
+        .clock-seg { stroke: var(--bg-secondary); stroke-width: 1; cursor: pointer; opacity: 0.92; }
+        .clock-seg.done { opacity: 0.3; }
+        .clock-seg:hover { opacity: 1; stroke: #fff; }
+        .clock-tick { stroke: var(--text-secondary); stroke-width: 1.5; }
+        .clock-num { fill: var(--text-secondary); font-size: 11px; text-anchor: middle; dominant-baseline: central; }
+        .clock-hand { stroke: #ff6b6b; stroke-width: 3; stroke-linecap: round; }
+        .clock-hub { fill: #ff6b6b; }
+        .cv-list { list-style: none; padding: 0; margin: 0 0 10px; }
+        .cv-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--bg-secondary); margin-bottom: 6px; cursor: pointer; font-size: 0.92rem; }
+        .cv-row:hover { background: var(--bg-tertiary); }
+        .cv-row.done .cv-title { text-decoration: line-through; opacity: 0.6; }
+        .cv-row.est { border: 1px dashed var(--text-secondary); background: transparent; }
+        .cv-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+        .cv-time { font-family: monospace; color: var(--text-secondary); min-width: 92px; }
+        .cv-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+        .cv-dur { color: var(--text-secondary); font-size: 0.8rem; white-space: nowrap; }
+        .cv-sub { font-size: 0.8rem; color: var(--text-secondary); margin: 6px 0; line-height: 1.5; }
+        .cv-empty { color: var(--text-secondary); padding: 8px 4px; font-size: 0.9rem; }
+        .cal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+        .cal-month { font-size: 1.15rem; font-weight: 700; flex: 1; text-align: center; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px; }
+        .cal-wd { text-align: center; font-size: 0.8rem; color: var(--text-secondary); padding: 2px 0; }
+        .cal-cell { min-height: 78px; background: var(--bg-secondary); border: 2px solid transparent; border-radius: 8px; padding: 4px 5px; text-align: left; color: var(--text-primary); cursor: pointer; display: flex; flex-direction: column; gap: 2px; font-family: inherit; overflow: hidden; }
+        .cal-cell.other { opacity: 0.45; }
+        .cal-cell.today .cal-day { background: var(--accent-primary); color: #fff; border-radius: 10px; padding: 0 6px; }
+        .cal-cell.selected { border-color: var(--accent-primary); }
+        .cal-day { font-weight: 700; font-size: 0.85rem; align-self: flex-start; }
+        .cal-dots { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; }
+        .cal-dots i, .cal-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--c); display: inline-block; }
+        .cal-dots i.est, .cal-legend i.est { background: transparent; border: 1.5px dashed var(--c); width: 6px; height: 6px; }
+        .cal-dots i.done { opacity: 0.35; }
+        .cal-dots em { font-size: 0.65rem; color: var(--text-secondary); font-style: normal; }
+        .cal-titles { display: flex; flex-direction: column; font-size: 0.7rem; line-height: 1.3; color: var(--text-secondary); }
+        .cal-titles span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .cal-titles span.est { font-style: italic; opacity: 0.8; }
+        .cal-mins { font-size: 0.65rem; color: var(--text-secondary); margin-top: auto; }
+        .cal-legend { font-size: 0.75rem; color: var(--text-secondary); margin: 8px 0 12px; display: flex; align-items: center; gap: 4px; }
+        .cal-detail-head { font-weight: 700; margin-bottom: 8px; display: flex; justify-content: space-between; gap: 8px; }
+        .cal-detail-head span { font-weight: 400; font-size: 0.85rem; color: var(--text-secondary); }
+        .cal-est-tag { font-size: 0.72rem; color: var(--text-secondary); white-space: nowrap; }
+        @media (max-width: 768px) {
+            .clock-faces { flex-wrap: nowrap; gap: 8px; }
+            .clock-face { flex: 1 1 0; min-width: 0; padding: 4px; }
+            .clock-face-title { font-size: 0.8rem; }
+            .cal-cell { min-height: 54px; padding: 3px; }
+            .cal-titles, .cal-mins { display: none; }
+            .cv-time { min-width: 76px; font-size: 0.8rem; }
+        }
+        /* 側欄開關（v8.0.0）：拖曳排序／隱藏已完成，點整列切換 */
+        .switch-item { width: 100%; background: none; color: inherit; text-align: left; font-family: inherit; }
+        .side-switch { margin-left: auto; position: relative; width: 36px; height: 20px; flex-shrink: 0; border-radius: 20px; background: var(--bg-tertiary); border: 1px solid var(--border-color, #888); transition: background .2s; }
+        .side-switch::before { content: ''; position: absolute; width: 14px; height: 14px; left: 2px; top: 2px; border-radius: 50%; background: var(--text-secondary); transition: transform .2s; }
+        .switch-item[aria-checked="true"] .side-switch { background: var(--accent-primary); border-color: var(--accent-primary); }
+        .switch-item[aria-checked="true"] .side-switch::before { transform: translateX(16px); background: #fff; }
 
         .filter-icon {
             font-size: 1.1rem;
@@ -798,6 +871,11 @@
             flex-direction: column;
         }
 
+        .weekday-picker { display: flex; gap: 6px; flex-wrap: wrap; }
+        .weekday-chip { width: 38px; height: 34px; border-radius: 8px; border: 1px solid var(--border-color, #444); background: var(--bg-tertiary); color: var(--text-secondary); cursor: pointer; font-size: 0.9rem; }
+        .weekday-chip.active { background: var(--accent-primary); border-color: var(--accent-primary); color: #fff; font-weight: 600; }
+        .weekday-chip:disabled { opacity: 0.4; cursor: not-allowed; }
+        .weekday-hint { font-size: 0.75rem; color: var(--text-secondary); margin-top: 6px; line-height: 1.5; }
         .recurring-end-row {
             display: flex;
             align-items: flex-end;
@@ -1278,7 +1356,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v7.2.2';
+        const APP_VERSION = 'v8.0.0';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1604,13 +1682,23 @@
                     <span class="filter-icon">📊</span>
                     所有任務
                 </button>
-                <button class="filter-item" id="toggleSortBtn">
+                <button class="filter-item" data-filter="clock">
+                    <span class="filter-icon">🕐</span>
+                    時鐘視圖
+                </button>
+                <button class="filter-item" data-filter="calendar">
+                    <span class="filter-icon">📅</span>
+                    日曆視圖
+                </button>
+                <button class="filter-item switch-item" id="toggleSortBtn" role="switch" aria-checked="true" title="開：拖曳排序／關：固定排序">
                     <span class="filter-icon">🔄</span>
                     <span id="sortModeText">拖曳排序</span>
+                    <span class="side-switch" aria-hidden="true"></span>
                 </button>
-                <button class="filter-item" id="toggleCompletedBtn">
+                <button class="filter-item switch-item" id="toggleCompletedBtn" role="switch" aria-checked="false" title="開：隱藏已完成／關：顯示已完成">
                     <span class="filter-icon">✅</span>
-                    <span id="completedVisibilityText">顯示已完成</span>
+                    <span id="completedVisibilityText">隱藏已完成</span>
+                    <span class="side-switch" aria-hidden="true"></span>
                 </button>
                 <button class="filter-item" id="statsBtn">
                     <span class="filter-icon">📊</span>
@@ -1643,8 +1731,15 @@
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="cloudSyncNowBtn">
                     🔄 立即同步
                 </button>
-                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 14px;" id="cloudSyncSetupBtn">
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 12px;" id="cloudSyncSetupBtn">
                     ⚙️ 雲端同步設定
+                </button>
+                <div class="cloud-status" id="gcalStatus">📅 Google 日曆：未連動</div>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px; display: none;" id="gcalSyncNowBtn">
+                    🔄 立即同步日曆
+                </button>
+                <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 14px;" id="gcalSetupBtn">
+                    📅 連動 Google 日曆
                 </button>
                 <div class="sidebar-section-title">備份檔</div>
                 <button class="btn btn-secondary" style="width: 100%; justify-content: center; margin-bottom: 6px;" id="exportFileBtn">
@@ -1684,6 +1779,7 @@
                 <div class="stats-container" id="statsContainer"></div>
                 <div class="group-pause-bar" id="groupPauseBar" hidden></div>
                 <ul class="task-list" id="taskList"></ul>
+                <div class="special-view" id="specialView" hidden></div>
                 <div class="empty-state" id="emptyState" style="display: none;">
                     <div class="empty-state-icon">🎯</div>
                     <div class="empty-state-text">沒有任務</div>
@@ -1820,6 +1916,20 @@
                     <div class="form-group">
                         <label>迴圈間隔（天）</label>
                         <input type="number" id="recurringDays" min="1" value="1">
+                    </div>
+
+                    <div class="form-group" id="recurWeekdayGroup">
+                        <label>每週內重複（選填）</label>
+                        <div class="weekday-picker" id="recurWeekdays">
+                            <button type="button" class="weekday-chip" data-dow="1">一</button>
+                            <button type="button" class="weekday-chip" data-dow="2">二</button>
+                            <button type="button" class="weekday-chip" data-dow="3">三</button>
+                            <button type="button" class="weekday-chip" data-dow="4">四</button>
+                            <button type="button" class="weekday-chip" data-dow="5">五</button>
+                            <button type="button" class="weekday-chip" data-dow="6">六</button>
+                            <button type="button" class="weekday-chip" data-dow="0">日</button>
+                        </div>
+                        <div class="weekday-hint" id="recurWeekdayHint">點選星期後，只在這些星期出現；「迴圈間隔」當作週期（7＝每週、14＝每兩週）。例：週期 7 天、選一和三 → 週三完成後建立到下週一。</div>
                     </div>
 
                     <div class="form-group">
@@ -1966,6 +2076,62 @@
                     📋 複製連結
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- 📅 連動 Google 日曆（v8.0.0，單向：日曆 → TDM） -->
+    <div class="modal" id="gcalModal">
+        <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">📅 連動 Google 日曆</div>
+            <div class="sync-help">
+                把 Google 日曆的活動同步成任務（<strong>單向</strong>）：日曆新增／修改／刪除活動會反映到 TodoMaster；在 TodoMaster 裡的修改<strong>不會</strong>改到日曆。
+                只要求<strong>唯讀</strong>權限；設定與授權只存在這台裝置，匯入的任務會照常隨雲端同步到其他裝置。
+            </div>
+            <details class="sync-help" style="margin-top: 8px;">
+                <summary style="cursor: pointer;"><strong>第一次使用：建立 OAuth 用戶端 ID（約 5 分鐘）</strong></summary>
+                <ol style="margin: 8px 0 0 18px; padding: 0; line-height: 1.7;">
+                    <li>到 console.cloud.google.com 建立（或選擇）一個專案</li>
+                    <li>「API 和服務 → 程式庫」搜尋並<strong>啟用 Google Calendar API</strong></li>
+                    <li>「OAuth 同意畫面」：User Type 選「外部」，填 App 名稱與自己的信箱；在「測試使用者」加入自己的 Google 帳號</li>
+                    <li>「憑證 → 建立憑證 → OAuth 用戶端 ID」，類型選<strong>網頁應用程式</strong>，「已授權的 JavaScript 來源」填：<code id="gcalOrigin"></code></li>
+                    <li>複製產生的「用戶端 ID」（xxxx.apps.googleusercontent.com）貼到下方</li>
+                </ol>
+            </details>
+            <form id="gcalForm" autocomplete="off" style="margin-top: 12px;">
+                <div class="form-group">
+                    <label for="gcalClientId">OAuth 用戶端 ID</label>
+                    <input type="text" id="gcalClientId" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off" required>
+                </div>
+                <div class="form-group">
+                    <label for="gcalCalendars">日曆 ID（多個用逗號分隔；primary＝主要日曆）</label>
+                    <input type="text" id="gcalCalendars" placeholder="primary" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="gcalCategory">匯入後的分類</label>
+                    <select id="gcalCategory" class="form-select"></select>
+                </div>
+                <div class="form-group">
+                    <div class="recurring-end-row">
+                        <div class="recurring-end-col">
+                            <label for="gcalPastDays">同步過去（天）</label>
+                            <input type="number" id="gcalPastDays" min="0" max="365" value="7">
+                        </div>
+                        <div class="recurring-end-col">
+                            <label for="gcalFutureDays">同步未來（天）</label>
+                            <input type="number" id="gcalFutureDays" min="1" max="365" value="60">
+                        </div>
+                    </div>
+                    <div class="sync-msg" id="gcalFormMsg"></div>
+                </div>
+                <div class="sync-help" style="font-size: 0.78rem;">
+                    有時刻的活動依起訖時間換算預計時間；全天活動設為「非連續」不計時。授權約 1 小時有效，期間每 15 分鐘與回到 App 時自動同步；過期後按側欄「立即同步日曆」重新授權即可。
+                </div>
+                <div class="modal-footer" style="margin-top: 8px; padding-top: 16px;">
+                    <button type="button" class="btn btn-secondary" id="gcalDisconnectBtn" style="display: none; margin-right: auto;">中斷連動</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('gcalModal')">關閉</button>
+                    <button type="submit" class="btn btn-primary" id="gcalSaveBtn">授權並同步</button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -2338,6 +2504,104 @@
             const m = (task && task.recurring && task.recurring.mode) || (task && task.groupDelayMode);
             if (m === 'fixed' || m === 'auto') return m;
             return task && task.groupId ? 'fixed' : 'auto';
+        }
+
+        // ===== 連動 Google 日曆（v8.0.0，單向：日曆 → TDM）=====
+        // 只讀取（calendar.readonly），TDM 內的修改不會寫回日曆；日曆有更新（event.updated 改變）時覆蓋 TDM 對應任務的內容。
+        // 設定與 access token 只存這台裝置（localStorage），不進雲端同步與備份檔；匯入的任務則照常隨雲端同步。
+        const GCAL_SCOPE = 'https://www.googleapis.com/auth/calendar.readonly';
+        const GCAL_DEFAULTS = { clientId: '', calendars: 'primary', category: 'life', pastDays: 7, futureDays: 60, lastSync: 0, enabled: false };
+        function gcalCalKey(calendarId) {
+            if (calendarId === 'primary') return 'p';
+            let h = 0;
+            for (const ch of String(calendarId)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+            return h.toString(36);
+        }
+        function gcalTaskId(calendarId, eventId) {
+            return `gcal_${gcalCalKey(calendarId)}_${String(eventId).replace(/[^A-Za-z0-9_-]/g, '')}`;
+        }
+        // 日曆的說明欄可能含 HTML：轉成純文字
+        function gcalPlainText(html) {
+            return String(html || '')
+                .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<[^>]+>/g, '')
+                .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+                .replace(/\n{3,}/g, '\n\n').trim();
+        }
+        // 日曆活動 → 任務欄位（日期、時刻、預計時間由活動起訖推算；全天活動＝不計時）
+        function gcalEventToFields(ev) {
+            const fields = { title: (ev.summary || '').trim() || '（無標題活動）' };
+            const desc = [gcalPlainText(ev.description), ev.location ? `📍 ${ev.location}` : ''].filter(Boolean).join('\n');
+            fields.description = desc;
+            if (ev.start && ev.start.dateTime) {
+                const st = new Date(ev.start.dateTime);
+                const en = ev.end && ev.end.dateTime ? new Date(ev.end.dateTime) : st;
+                fields.date = localDateStr(st);
+                fields.time = `${String(st.getHours()).padStart(2, '0')}:${String(st.getMinutes()).padStart(2, '0')}`;
+                const dur = Math.max(0, Math.round((en - st) / 60000));
+                if (dur <= 10) { fields.estimatedTime = '10min'; fields.blocks = null; }
+                else if (dur <= 30) { fields.estimatedTime = '30min'; fields.blocks = null; }
+                else { fields.estimatedTime = '30plus'; fields.blocks = Math.max(2, Math.ceil(dur / BLOCK_MINUTES)); }
+            } else {
+                fields.date = (ev.start && ev.start.date) || '';
+                fields.time = null;
+                fields.estimatedTime = 'non-continuous';
+                fields.blocks = null;
+            }
+            return fields;
+        }
+
+        // ===== 每週內重複（v8.0.0）=====
+        // recurring.weekdays = [0..6]（0＝週日）；非空時只在這些星期出現，「間隔」視為週期：7 天＝每週、14 天＝每 2 週…
+        // 例：週期 7 天、勾一與三 → 週三完成後下一次是下週一，週一完成後是週三（一週從週一起算）
+        const WEEKDAY_LABELS = ['日', '一', '二', '三', '四', '五', '六'];
+        function recurWeekdays(rec) {
+            if (!rec || !Array.isArray(rec.weekdays)) return [];
+            return [...new Set(rec.weekdays.map(Number).filter(d => Number.isInteger(d) && d >= 0 && d <= 6))].sort((a, b) => a - b);
+        }
+        function dayOfWeek(dateStr) {
+            const [y, m, d] = dateStr.split('-').map(Number);
+            return new Date(y, m - 1, d).getDay();
+        }
+        // 下一次日期：沒勾星期 → base + 間隔；有勾星期 → base 之後第一個勾選的星期（跨週時再多跳 週期-1 週）
+        function nextRecurDate(base, rec) {
+            const interval = Math.max(1, parseInt(rec && rec.interval) || 1);
+            const days = recurWeekdays(rec);
+            if (!days.length) return addDaysToDate(base, interval);
+            const weeks = Math.max(1, Math.round(interval / 7));
+            const monIdx = d => (d + 6) % 7;   // 週一=0 … 週日=6
+            const baseDow = dayOfWeek(base);
+            for (let i = 1; i <= 7; i++) {
+                const dow = (baseDow + i) % 7;
+                if (days.includes(dow)) {
+                    const wrapped = monIdx(dow) <= monIdx(baseDow);
+                    return addDaysToDate(base, i + (wrapped ? (weeks - 1) * 7 : 0));
+                }
+            }
+            return addDaysToDate(base, interval);
+        }
+        // 從 start 往後推 k 次
+        function advanceRecurDate(start, rec, k) {
+            let d = start;
+            for (let i = 0; i < k; i++) d = nextRecurDate(d, rec);
+            return d;
+        }
+        // start（含）到 until（含）之間共幾次
+        function countRecurUntil(start, rec, until) {
+            if (!start || !until || until < start) return 0;
+            let n = 1, d = start;
+            for (let guard = 0; guard < 5000; guard++) {
+                d = nextRecurDate(d, rec);
+                if (d > until) break;
+                n++;
+            }
+            return n;
+        }
+        function recurLabel(rec) {
+            const days = recurWeekdays(rec);
+            if (!days.length) return `每${rec.interval}天`;
+            const weeks = Math.max(1, Math.round((rec.interval || 7) / 7));
+            const order = [1, 2, 3, 4, 5, 6, 0].filter(d => days.includes(d));
+            return `${weeks > 1 ? `每${weeks}週` : '每週'}${order.map(d => WEEKDAY_LABELS[d]).join('、')}`;
         }
 
         function nextRecurringId(task) {
@@ -3181,9 +3445,14 @@
                     this.setupSyncListeners();
                     this.setupAiListeners();
                     this.updateUI();
+                    this.setupGcalListeners();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
                     setInterval(() => this._placeNowLine(), 60000);
+                    // 時鐘視圖：每 30 秒更新指針與剩餘時間（只在顯示時鐘視圖且沒開視窗時）
+                    setInterval(() => {
+                        if (this.currentFilter === 'clock' && !document.hidden && !document.querySelector('.modal.active')) this.renderClockView(document.getElementById('specialView'));
+                    }, 30000);
                     this._consumeSetupHash();
                     this.cloud.start();
                 } catch (e) {
@@ -4038,6 +4307,7 @@
                 const emptyState = document.getElementById('emptyState');
 
                 this.renderGroupPauseBar();
+                if (this._renderSpecialView()) return;
                 const filtered = this.getFilteredTasks();
                 const query = this.searchQuery.trim();
                 taskList.classList.toggle('searching', !!query);
@@ -4468,7 +4738,7 @@
                                 ${task.time ? `<div class="task-meta-item">🕐 ${task.time}</div>` : ''}
                                 <div class="task-meta-item">${TIME_META[task.estimatedTime]?.emoji} ${estimatedDisplay}</div>
                                 ${task.actualTime ? `<div class="task-meta-item">✓ ${task.actualTime}分鐘</div>` : ''}
-                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 每${task.recurring.interval}天${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : ''}${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
+                                ${task.recurring && task.recurring.enabled ? `<div class="task-meta-item">🔁 ${task.groupId ? `每${task.recurring.interval}天` : recurLabel(task.recurring)}${task.recurring.repeatCount ? ` 共${task.recurring.repeatCount}次` : ''}${task.recurring.untilDate ? ` 至 ${task.recurring.untilDate}` : ''}${task.recurring.completedCount ? ` · 已完成${task.recurring.completedCount}次` : ''}</div>` : ''}
                                 ${task.paused ? '<div class="task-meta-item">⏸ 已暫停</div>' : ''}
                                 ${task.recurring && task.recurring.enabled && !task.groupId && !task.completed ? `<label class="task-meta-item pause-inline" title="暫停迴圈：改為不限期，恢復時排回今天"><span class="pause-switch"><input type="checkbox" class="pause-toggle" ${task.paused ? 'checked' : ''}><span class="slider"></span></span>暫停迴圈</label>` : ''}
                             </div>
@@ -4877,6 +5147,534 @@
                 `;
             }
 
+            // ===== 連動 Google 日曆（v8.0.0）=====
+            gcalConfig() {
+                return { ...GCAL_DEFAULTS, ...lsReadJson('todoGcalConfig', {}) };
+            }
+            gcalSaveConfig(cfg) {
+                try { localStorage.setItem('todoGcalConfig', JSON.stringify(cfg)); } catch (_) {}
+            }
+            _gcalToken() {
+                const t = lsReadJson('todoGcalToken', null);
+                return t && t.token && t.exp > Date.now() + 60000 ? t.token : null;
+            }
+            _gcalCalendars(cfg) {
+                return String(cfg.calendars || 'primary').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+            }
+
+            // 套用某個日曆在 [from, to] 期間的活動：新增／更新／刪除對應任務。回傳 { added, updated, removed }
+            gcalApply(calendarId, events, from, to, cfg) {
+                const res = { added: 0, updated: 0, removed: 0 };
+                const seen = new Set();
+                const category = CATEGORY_META[cfg.category] ? cfg.category : Object.keys(CATEGORY_META)[0];
+                for (const ev of events) {
+                    if (!ev || !ev.id || ev.status === 'cancelled') continue;
+                    const id = gcalTaskId(calendarId, ev.id);
+                    seen.add(id);
+                    const fields = gcalEventToFields(ev);
+                    if (!fields.date) continue;
+                    const meta = { calendarId, eventId: ev.id, updated: ev.updated || '', link: ev.htmlLink || '' };
+                    const task = this.tasks.find(t => t.id === id);
+                    const evUpdated = Date.parse(ev.updated || '') || 0;
+                    if (!task) {
+                        // 在 TDM 刪掉的活動：日曆之後沒再修改就不重新匯入
+                        if (this.deletedTasks[id] && this.deletedTasks[id] >= evUpdated) continue;
+                        delete this.deletedTasks[id];
+                        this.tasks.push({
+                            id, ...fields, category, taskType: 'goal', tags: [],
+                            completedBlocks: 0, blockTimes: [], recurring: null, groupId: null, groupOrder: null,
+                            actualTime: null, nextStepNotes: null, pinned: null,
+                            completed: false, completedAt: null, order: this.tasks.length, gcal: meta
+                        });
+                        res.added++;
+                    } else if (!task.gcal || task.gcal.updated !== meta.updated) {
+                        // 日曆有修改 → 覆蓋內容；已完成的任務只更新名稱與說明，不動日期與時間統計
+                        const upd = task.completed ? { title: fields.title, description: fields.description } : fields;
+                        Object.assign(task, upd, { gcal: meta });
+                        res.updated++;
+                    }
+                }
+                // 日曆上已刪除（或移出同步範圍）的活動：刪除期間內尚未完成的對應任務
+                const before = this.tasks.length;
+                this.tasks = this.tasks.filter(t => !(t.gcal && t.gcal.calendarId === calendarId && !seen.has(t.id)
+                    && !t.completed && t.date >= from && t.date <= to));
+                res.removed = before - this.tasks.length;
+                return res;
+            }
+
+            _loadGis() {
+                if (window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
+                if (this._gisLoading) return this._gisLoading;
+                this._gisLoading = new Promise((resolve, reject) => {
+                    const s = document.createElement('script');
+                    s.src = 'https://accounts.google.com/gsi/client';
+                    s.async = true;
+                    s.onload = () => resolve();
+                    s.onerror = () => { this._gisLoading = null; reject(new Error('無法載入 Google 登入元件（請確認已連網）')); };
+                    document.head.appendChild(s);
+                });
+                return this._gisLoading;
+            }
+
+            // 跳出 Google 授權視窗取得 access token（約 1 小時有效）；必須由使用者點擊觸發，否則會被擋彈出視窗
+            async gcalAuthorize() {
+                const cfg = this.gcalConfig();
+                if (!cfg.clientId) throw new Error('請先填入 OAuth 用戶端 ID');
+                if (location.protocol === 'file:') throw new Error('Google 授權不支援直接開啟的檔案（file://），請改用 GitHub Pages 網址開啟');
+                await this._loadGis();
+                return new Promise((resolve, reject) => {
+                    const client = google.accounts.oauth2.initTokenClient({
+                        client_id: cfg.clientId,
+                        scope: GCAL_SCOPE,
+                        callback: r => {
+                            if (r && r.access_token) {
+                                try { localStorage.setItem('todoGcalToken', JSON.stringify({ token: r.access_token, exp: Date.now() + (Number(r.expires_in) || 3600) * 1000 })); } catch (_) {}
+                                resolve(r.access_token);
+                            } else reject(new Error((r && (r.error_description || r.error)) || '授權失敗'));
+                        },
+                        error_callback: e => reject(new Error(e && e.type === 'popup_closed' ? '已關閉授權視窗' : e && e.type === 'popup_failed_to_open' ? '授權視窗被瀏覽器封鎖，請允許彈出視窗' : '授權失敗'))
+                    });
+                    client.requestAccessToken({ prompt: '' });
+                });
+            }
+
+            async _gcalFetchEvents(token, calendarId, timeMin, timeMax) {
+                const items = [];
+                let pageToken = '';
+                for (let page = 0; page < 20; page++) {
+                    const q = new URLSearchParams({ timeMin, timeMax, singleEvents: 'true', orderBy: 'startTime', maxResults: '250' });
+                    if (pageToken) q.set('pageToken', pageToken);
+                    const res = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${q}`, { headers: { Authorization: `Bearer ${token}` } });
+                    if (res.status === 401) { localStorage.removeItem('todoGcalToken'); throw Object.assign(new Error('授權已過期，請按「立即同步」重新授權'), { auth: true }); }
+                    if (res.status === 404) throw new Error(`找不到日曆「${calendarId}」`);
+                    if (!res.ok) throw new Error(`Google 日曆回應錯誤（${res.status}）`);
+                    const data = await res.json();
+                    items.push(...(data.items || []));
+                    if (!data.nextPageToken) break;
+                    pageToken = data.nextPageToken;
+                }
+                return items;
+            }
+
+            // interactive：使用者按按鈕觸發，可跳授權視窗；自動同步則只在 token 仍有效時進行
+            async gcalSync({ interactive = false } = {}) {
+                const cfg = this.gcalConfig();
+                if (!cfg.enabled || !cfg.clientId) return null;
+                if (this._gcalBusy) return null;
+                this._gcalBusy = true;
+                this._gcalMsg = '⏳ 同步 Google 日曆中…';
+                this.renderGcalStatus();
+                try {
+                    let token = this._gcalToken();
+                    if (!token) {
+                        if (!interactive) { this._gcalMsg = ''; return null; }
+                        token = await this.gcalAuthorize();
+                    }
+                    const today = localDateStr();
+                    const from = addDaysToDate(today, -Math.max(0, cfg.pastDays | 0));
+                    const to = addDaysToDate(today, Math.max(1, cfg.futureDays | 0));
+                    const [fy, fm, fd] = from.split('-').map(Number), [ty, tm, td] = to.split('-').map(Number);
+                    const timeMin = new Date(fy, fm - 1, fd).toISOString(), timeMax = new Date(ty, tm - 1, td + 1).toISOString();
+                    const total = { added: 0, updated: 0, removed: 0 };
+                    for (const cal of this._gcalCalendars(cfg)) {
+                        const events = await this._gcalFetchEvents(token, cal, timeMin, timeMax);
+                        const r = this.gcalApply(cal, events, from, to, cfg);
+                        total.added += r.added; total.updated += r.updated; total.removed += r.removed;
+                    }
+                    this.gcalSaveConfig({ ...this.gcalConfig(), lastSync: Date.now() });
+                    this._gcalMsg = '';
+                    if (total.added || total.updated || total.removed) {
+                        this.saveToStorage();
+                        this.updateUI();
+                    }
+                    return total;
+                } catch (e) {
+                    this._gcalMsg = '⚠️ ' + (e && e.message ? e.message : e);
+                    throw e;
+                } finally {
+                    this._gcalBusy = false;
+                    this.renderGcalStatus();
+                }
+            }
+
+            renderGcalStatus() {
+                const el = document.getElementById('gcalStatus');
+                if (!el) return;
+                const cfg = this.gcalConfig();
+                let text;
+                if (!cfg.enabled || !cfg.clientId) text = '📅 Google 日曆：未連動';
+                else if (this._gcalMsg) text = this._gcalMsg;
+                else if (!this._gcalToken()) text = '📅 Google 日曆：需重新授權（按「立即同步日曆」）';
+                else {
+                    const mins = cfg.lastSync ? Math.round((Date.now() - cfg.lastSync) / 60000) : null;
+                    text = `📅 Google 日曆：已連動${mins === null ? '' : mins < 1 ? ' · 剛剛' : ` · ${mins} 分鐘前`}`;
+                }
+                el.textContent = text;
+                const now = document.getElementById('gcalSyncNowBtn');
+                if (now) now.style.display = cfg.enabled && cfg.clientId ? '' : 'none';
+            }
+
+            openGcalModal() {
+                const cfg = this.gcalConfig();
+                $('gcalClientId').value = cfg.clientId || '';
+                $('gcalCalendars').value = cfg.calendars || 'primary';
+                $('gcalPastDays').value = cfg.pastDays;
+                $('gcalFutureDays').value = cfg.futureDays;
+                const sel = $('gcalCategory');
+                sel.innerHTML = Object.keys(CATEGORY_META).map(k => `<option value="${escapeHtml(k)}">${escapeHtml(categoryText(k))}</option>`).join('');
+                sel.value = CATEGORY_META[cfg.category] ? cfg.category : Object.keys(CATEGORY_META)[0];
+                $('gcalOrigin').textContent = location.protocol === 'file:' ? '（目前以 file:// 開啟，無法授權；請用 GitHub Pages 網址）' : location.origin;
+                $('gcalDisconnectBtn').style.display = cfg.enabled ? '' : 'none';
+                $('gcalFormMsg').textContent = '';
+                $('gcalFormMsg').className = 'sync-msg';
+                this.openModal('gcalModal');
+            }
+
+            setupGcalListeners() {
+                const syncAndReport = async () => {
+                    try {
+                        const r = await this.gcalSync({ interactive: true });
+                        if (r) this.showNotification(r.added || r.updated || r.removed ? `📅 日曆同步：新增 ${r.added}、更新 ${r.updated}、移除 ${r.removed}` : '📅 日曆已是最新');
+                        return true;
+                    } catch (e) {
+                        this.showNotification('⚠️ ' + (e && e.message ? e.message : e));
+                        return false;
+                    }
+                };
+                $('gcalSetupBtn').addEventListener('click', () => this.openGcalModal());
+                $('gcalSyncNowBtn').addEventListener('click', syncAndReport);
+                $('gcalForm').addEventListener('submit', async e => {
+                    e.preventDefault();
+                    const msg = $('gcalFormMsg');
+                    const clientId = $('gcalClientId').value.trim();
+                    if (!/^[\w.-]+\.apps\.googleusercontent\.com$/.test(clientId)) {
+                        msg.textContent = '用戶端 ID 格式應為 xxxx.apps.googleusercontent.com';
+                        msg.className = 'sync-msg err';
+                        return;
+                    }
+                    const prev = this.gcalConfig();
+                    if (prev.clientId && prev.clientId !== clientId) localStorage.removeItem('todoGcalToken');
+                    this.gcalSaveConfig({
+                        ...prev, clientId, enabled: true,
+                        calendars: $('gcalCalendars').value.trim() || 'primary',
+                        category: $('gcalCategory').value,
+                        pastDays: Math.min(365, Math.max(0, parseInt($('gcalPastDays').value) || 0)),
+                        futureDays: Math.min(365, Math.max(1, parseInt($('gcalFutureDays').value) || 60))
+                    });
+                    msg.textContent = '授權與同步中…';
+                    msg.className = 'sync-msg';
+                    if (await syncAndReport()) closeModal('gcalModal');
+                    else { msg.textContent = this._gcalMsg || '同步失敗'; msg.className = 'sync-msg err'; }
+                });
+                $('gcalDisconnectBtn').addEventListener('click', () => {
+                    if (!confirm('要中斷 Google 日曆連動嗎？\n已匯入的任務會保留（之後不再隨日曆更新）。')) return;
+                    const tok = this._gcalToken();
+                    try { if (tok && window.google && google.accounts && google.accounts.oauth2) google.accounts.oauth2.revoke(tok, () => {}); } catch (_) {}
+                    localStorage.removeItem('todoGcalToken');
+                    this.gcalSaveConfig({ ...this.gcalConfig(), enabled: false });
+                    closeModal('gcalModal');
+                    this.renderGcalStatus();
+                    this.showNotification('已中斷 Google 日曆連動');
+                });
+                // 自動同步：開啟時、回到前景、每 15 分鐘（token 仍有效時；過期需使用者按鈕重新授權）
+                const auto = () => { if (!document.hidden) this.gcalSync().catch(() => {}); };
+                document.addEventListener('visibilitychange', () => { if (!document.hidden) { const c = this.gcalConfig(); if (Date.now() - (c.lastSync || 0) > 5 * 60000) auto(); else this.renderGcalStatus(); } });
+                setInterval(auto, 15 * 60000);
+                setInterval(() => this.renderGcalStatus(), 60000);
+                this.renderGcalStatus();
+                auto();
+            }
+
+            // ===== 時鐘視圖／日曆視圖（v8.0.0）=====
+            // renderTasks() 開頭呼叫：目前是特殊視圖就畫在 #specialView 並回傳 true（任務清單隱藏）
+            _renderSpecialView() {
+                const view = this.currentFilter;
+                const box = document.getElementById('specialView');
+                const taskList = document.getElementById('taskList');
+                const emptyState = document.getElementById('emptyState');
+                const special = view === 'clock' || view === 'calendar';
+                if (box) box.hidden = !special;
+                if (!special) { taskList.style.display = ''; return false; }
+                taskList.style.display = 'none';
+                taskList.innerHTML = '';
+                emptyState.style.display = 'none';
+                const pauseBar = document.getElementById('groupPauseBar');
+                if (pauseBar) pauseBar.hidden = true;
+                if (view === 'clock') this.renderClockView(box);
+                else this.renderCalendarView(box);
+                return true;
+            }
+
+            // 某天的實際任務（不含子任務、暫存、不限期）；遵守「隱藏已完成」
+            _tasksOnDate(dateStr) {
+                return this.tasks.filter(t => !isSubtask(t) && t.date === dateStr && (this.showCompleted || !t.completed));
+            }
+
+            _taskColor(task) {
+                const c = CATEGORY_META[task.category] && CATEGORY_META[task.category].color;
+                return /^#[0-9a-f]{6}$/i.test(c || '') ? c : '#94a3b8';
+            }
+
+            // --- 時鐘視圖：上午／下午兩個 12 小時鐘面，任務依時刻與預計時間畫成扇形，指針＝現在 ---
+            renderClockView(box) {
+                const now = new Date();
+                const todayStr = localDateStr(now);
+                const nowMin = now.getHours() * 60 + now.getMinutes();
+                const all = this.tasks.filter(t => !isSubtask(t) && t.date === todayStr);
+                const shown = all.filter(t => this.showCompleted || !t.completed);
+                const timed = shown.filter(t => timeToMinutes(t.time) !== null)
+                    .map(t => {
+                        const start = timeToMinutes(t.time);
+                        const dur = getTaskPlannedMinutes(t);
+                        return { t, start, end: Math.min(24 * 60, start + Math.max(dur, 5)), dur };
+                    })
+                    .sort((a, b) => a.start - b.start || b.end - a.end);
+                const untimed = shown.filter(t => timeToMinutes(t.time) === null);
+
+                // 重疊的任務分到內圈（貪婪分道）
+                const laneEnds = [];
+                timed.forEach(s => {
+                    let lane = laneEnds.findIndex(e => e <= s.start);
+                    if (lane === -1) { lane = laneEnds.length; laneEnds.push(0); }
+                    laneEnds[lane] = s.end;
+                    s.lane = lane;
+                });
+                const lanes = Math.max(1, laneEnds.length);
+
+                // 摘要：今天預定／已完成／剩餘，以及到午夜還剩多少
+                const plannedAll = all.reduce((s, t) => s + getTaskPlannedMinutes(t), 0);
+                const plannedDone = all.filter(t => t.completed).reduce((s, t) => s + getTaskPlannedMinutes(t), 0);
+                const remainTask = plannedAll - plannedDone;
+                const leftDay = 24 * 60 - nowMin;
+                const free = leftDay - remainTask;
+                const hm = m => { const a = Math.abs(Math.round(m)); const h = Math.floor(a / 60), mm = a % 60; return (m < 0 ? '-' : '') + (h ? `${h} 小時 ` : '') + `${mm} 分`; };
+                const nextUp = timed.find(s => !s.t.completed && s.end > nowMin);
+
+                const face = (half) => {
+                    const off = half * 720;
+                    const C = 110, R = 100;
+                    const ang = m => ((m - off) / 720) * 2 * Math.PI - Math.PI / 2;
+                    const pt = (m, r) => [C + r * Math.cos(ang(m)), C + r * Math.sin(ang(m))];
+                    const arc = (m0, m1, r0, r1) => {
+                        if (m1 - m0 >= 720) m1 = m0 + 719.9;
+                        const large = (m1 - m0) > 360 ? 1 : 0;
+                        const [x0, y0] = pt(m0, r1), [x1, y1] = pt(m1, r1), [x2, y2] = pt(m1, r0), [x3, y3] = pt(m0, r0);
+                        return `M${x0.toFixed(2)},${y0.toFixed(2)} A${r1},${r1} 0 ${large} 1 ${x1.toFixed(2)},${y1.toFixed(2)} L${x2.toFixed(2)},${y2.toFixed(2)}` +
+                            (r0 > 0 ? ` A${r0},${r0} 0 ${large} 0 ${x3.toFixed(2)},${y3.toFixed(2)} Z` : ' Z');
+                    };
+                    let svg = `<svg viewBox="0 0 220 220" class="clock-svg" role="img" aria-label="${half ? '下午' : '上午'}鐘面">`;
+                    svg += `<circle cx="${C}" cy="${C}" r="${R}" class="clock-bg"/>`;
+                    // 已過去的時間：灰色遮罩
+                    const passedEnd = Math.min(Math.max(nowMin, off), off + 720);
+                    if (passedEnd > off) svg += passedEnd - off >= 720 ? `<circle cx="${C}" cy="${C}" r="${R}" class="clock-past"/>` : `<path d="${arc(off, passedEnd, 0, R)}" class="clock-past"/>`;
+                    // 任務扇形
+                    const band = 62 / lanes;
+                    timed.forEach(s => {
+                        const m0 = Math.max(s.start, off), m1 = Math.min(s.end, off + 720);
+                        if (m1 <= m0) return;
+                        const r1 = R - 2 - s.lane * band, r0 = Math.max(30, r1 - band + 2);
+                        const title = `${s.t.time}${s.dur ? `–${minutesToTime(s.t.time ? s.start + s.dur : 0)}` : ''} ${s.t.title}${s.t.completed ? '（已完成）' : ''}`;
+                        svg += `<path d="${arc(m0, m1, r0, r1)}" fill="${this._taskColor(s.t)}" class="clock-seg${s.t.completed ? ' done' : ''}" data-id="${escapeHtml(s.t.id)}"><title>${escapeHtml(title)}</title></path>`;
+                    });
+                    // 刻度與數字
+                    for (let h = 0; h < 12; h++) {
+                        const m = off + h * 60;
+                        const [x0, y0] = pt(m, R), [x1, y1] = pt(m, R - (h % 3 === 0 ? 9 : 5));
+                        svg += `<line x1="${x0.toFixed(1)}" y1="${y0.toFixed(1)}" x2="${x1.toFixed(1)}" y2="${y1.toFixed(1)}" class="clock-tick"/>`;
+                        const [tx, ty] = pt(m, 22);
+                        if (h % 3 === 0) svg += `<text x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" class="clock-num">${h + half * 12}</text>`;
+                    }
+                    // 指針（只畫在現在所在的鐘面）
+                    if (nowMin >= off && nowMin < off + 720) {
+                        const [hx, hy] = pt(nowMin, R + 4);
+                        svg += `<line x1="${C}" y1="${C}" x2="${hx.toFixed(1)}" y2="${hy.toFixed(1)}" class="clock-hand"/><circle cx="${C}" cy="${C}" r="4" class="clock-hub"/>`;
+                    }
+                    svg += '</svg>';
+                    const active = nowMin >= off && nowMin < off + 720;
+                    return `<div class="clock-face${active ? ' current' : ''}"><div class="clock-face-title">${half ? '🌇 下午 12–24' : '🌅 上午 0–12'}</div>${svg}</div>`;
+                };
+
+                const row = (s) => {
+                    const t = s ? s.t : null;
+                    return `<li class="cv-row${t.completed ? ' done' : ''}" data-id="${escapeHtml(t.id)}">
+                        <span class="cv-dot" style="background:${this._taskColor(t)}"></span>
+                        <span class="cv-time">${s.start !== null ? `${t.time}${s.dur ? `–${minutesToTime(s.start + s.dur)}` : ''}` : '—'}</span>
+                        <span class="cv-title">${t.completed ? '✓ ' : ''}${escapeHtml(t.title)}</span>
+                        <span class="cv-dur">${s.dur ? formatDuration(s.dur) : ''}</span></li>`;
+                };
+
+                box.innerHTML = `
+                    <div class="clock-view">
+                        <div class="cv-summary">
+                            <div class="cv-now">🕐 現在 ${minutesToTime(nowMin)}</div>
+                            <div class="cv-stats">
+                                <span>今天預定 <strong>${hm(plannedAll)}</strong></span>
+                                <span>已完成 <strong>${hm(plannedDone)}</strong></span>
+                                <span>待完成 <strong>${hm(remainTask)}</strong></span>
+                                <span>距今天結束 <strong>${hm(leftDay)}</strong></span>
+                                <span class="${free < 0 ? 'cv-neg' : 'cv-pos'}">${free < 0 ? '超出' : '扣掉待完成，還空'} <strong>${hm(Math.abs(free))}</strong></span>
+                            </div>
+                            ${nextUp ? `<div class="cv-next">${nextUp.start <= nowMin ? '▶ 進行中' : '⏭ 下一個'}：${escapeHtml(nextUp.t.title)}（${nextUp.t.time}${nextUp.start > nowMin ? `，${hm(nextUp.start - nowMin)}後` : ''}）</div>` : ''}
+                        </div>
+                        <div class="clock-faces">${face(0)}${face(1)}</div>
+                        <ul class="cv-list">${timed.map(row).join('') || '<li class="cv-empty">今天沒有指定時刻的任務</li>'}</ul>
+                        ${untimed.length ? `<div class="cv-sub">未指定時刻（不畫在鐘面上）</div><ul class="cv-list">${untimed.map(t => row({ t, start: null, dur: getTaskPlannedMinutes(t) })).join('')}</ul>` : ''}
+                    </div>`;
+                box.querySelectorAll('[data-id]').forEach(el => el.addEventListener('click', () => this.openEditModal(el.dataset.id)));
+            }
+
+            // --- 日曆視圖：月曆＋點選某天看任務；含「尚未建立、但依迴圈推算當天會建立」的預估任務 ---
+            // 回傳 Map(date → [{ task, n, date }])，n＝第幾次
+            projectRecurrences(fromDate, toDate) {
+                const out = new Map();
+                const existing = new Set(this.tasks.map(t => t.id));
+                const todayStr = localDateStr();
+                const push = (date, task, n) => {
+                    if (date < fromDate || date > toDate) return;
+                    if (!out.has(date)) out.set(date, []);
+                    out.get(date).push({ task, n, date });
+                };
+                const valid = t => t.date && t.date !== '9999-12-31' && !t.paused;
+                const live = this.tasks.filter(t => !isSubtask(t) && !t.completed && t.recurring && t.recurring.enabled && valid(t));
+                // 是否已超過終止條件（第 n 次、日期 d）
+                const ended = (rec, n, d) => rec.repeatCount ? n > rec.repeatCount : (rec.untilDate && d > rec.untilDate);
+
+                // 獨立迴圈任務：依「下次日期計算方式」往後推
+                live.filter(t => !t.groupId).forEach(t => {
+                    const rec = t.recurring;
+                    const series = t.seriesId || t.id;
+                    let n = (rec.completedCount || 0) + 1;   // 本任務是第 n 次
+                    let base = getRecurMode(t) === 'fixed' ? (rec.anchorDate || t.date) : (t.date < todayStr ? todayStr : t.date);
+                    for (let guard = 0; guard < 1000; guard++) {
+                        const d = nextRecurDate(base, rec);
+                        n++;
+                        if (d > toDate || ended(rec, n, d)) break;
+                        if (existing.has(`${series}~${n - 1}`)) break;   // 下一次已建立：由那個任務接手往後推
+                        push(d, t, n);
+                        base = d;
+                    }
+                });
+
+                // 群組：完成第一個 → 複製到「最後一個日期＋週期」，依群組順序輪流
+                const groups = new Map();
+                live.filter(t => t.groupId).forEach(t => { if (!groups.has(t.groupId)) groups.set(t.groupId, []); groups.get(t.groupId).push(t); });
+                groups.forEach(list => {
+                    list.sort((a, b) => (a.groupOrder ?? 999) - (b.groupOrder ?? 999));
+                    const counts = new Map(list.map(t => [t.id, (t.recurring.completedCount || 0) + 1]));
+                    const stopped = new Set();
+                    const last = list[list.length - 1];
+                    let lastDate = last.date, lastInterval = last.recurring.interval || 1;
+                    for (let k = 0; k < 1000 && stopped.size < list.length; k++) {
+                        const src = list[k % list.length];
+                        if (stopped.has(src.id)) continue;
+                        const n = counts.get(src.id) + 1;
+                        const d = addDaysToDate(lastDate, lastInterval);
+                        if (d > toDate) break;
+                        if (ended(src.recurring, n, d)) { stopped.add(src.id); continue; }
+                        counts.set(src.id, n);
+                        push(d, src, n);
+                        lastDate = d;
+                        lastInterval = src.recurring.interval || 1;
+                    }
+                });
+                return out;
+            }
+
+            renderCalendarView(box) {
+                const todayStr = localDateStr();
+                if (!this.calendarSelected) this.calendarSelected = todayStr;
+                if (!this.calendarMonth) this.calendarMonth = this.calendarSelected.slice(0, 7);
+                const [y, m] = this.calendarMonth.split('-').map(Number);
+                const first = new Date(y, m - 1, 1);
+                const lead = (first.getDay() + 6) % 7;   // 週一開頭
+                const gridStart = localDateStr(new Date(y, m - 1, 1 - lead));
+                const daysInMonth = new Date(y, m, 0).getDate();
+                const cells = Math.ceil((lead + daysInMonth) / 7) * 7;
+                const gridEnd = addDaysToDate(gridStart, cells - 1);
+                const projFrom = gridStart < todayStr ? todayStr : gridStart;
+                const proj = this.projectRecurrences(projFrom, gridEnd > this.calendarSelected ? gridEnd : this.calendarSelected);
+
+                let grid = '';
+                for (let i = 0; i < cells; i++) {
+                    const d = addDaysToDate(gridStart, i);
+                    const real = this._tasksOnDate(d);
+                    const est = proj.get(d) || [];
+                    const inMonth = d.slice(0, 7) === this.calendarMonth;
+                    const items = [...real.map(t => ({ t, est: false })), ...est.map(p => ({ t: p.task, est: true }))];
+                    const mins = real.filter(t => !t.completed).reduce((s, t) => s + getTaskPlannedMinutes(t), 0) + est.reduce((s, p) => s + getTaskPlannedMinutes(p.task), 0);
+                    grid += `<button type="button" class="cal-cell${inMonth ? '' : ' other'}${d === todayStr ? ' today' : ''}${d === this.calendarSelected ? ' selected' : ''}" data-date="${d}">
+                        <span class="cal-day">${Number(d.slice(8))}</span>
+                        <span class="cal-dots">${items.slice(0, 6).map(x => `<i class="${x.est ? 'est' : ''}${x.t.completed && !x.est ? ' done' : ''}" style="--c:${this._taskColor(x.t)}"></i>`).join('')}${items.length > 6 ? `<em>+${items.length - 6}</em>` : ''}</span>
+                        <span class="cal-titles">${items.slice(0, 2).map(x => `<span class="${x.est ? 'est' : ''}">${escapeHtml(x.t.title)}</span>`).join('')}</span>
+                        ${mins ? `<span class="cal-mins">${formatDuration(mins)}</span>` : ''}
+                    </button>`;
+                }
+
+                const sel = this.calendarSelected;
+                const selReal = this._tasksOnDate(sel).sort((a, b) => (timeToMinutes(a.time) ?? -1) - (timeToMinutes(b.time) ?? -1));
+                const selEst = (proj.get(sel) || []).sort((a, b) => (timeToMinutes(a.task.time) ?? -1) - (timeToMinutes(b.task.time) ?? -1));
+                const selMins = selReal.filter(t => !t.completed).reduce((s, t) => s + getTaskPlannedMinutes(t), 0) + selEst.reduce((s, p) => s + getTaskPlannedMinutes(p.task), 0);
+                const [sy, sm, sd] = sel.split('-').map(Number);
+                const selLabel = `${sm}月${sd}日（週${WEEKDAY_LABELS[new Date(sy, sm - 1, sd).getDay()]}）`;
+                const row = (t, est, n) => `<li class="cv-row${t.completed && !est ? ' done' : ''}${est ? ' est' : ''}" data-id="${escapeHtml(t.id)}">
+                        <span class="cv-dot" style="background:${this._taskColor(t)}"></span>
+                        <span class="cv-time">${t.time || '—'}</span>
+                        <span class="cv-title">${t.completed && !est ? '✓ ' : ''}${escapeHtml(t.title)}${est ? ` <span class="cal-est-tag">🔮 預估·第${n}次</span>` : ''}${t.gcal ? ' <span class="cal-est-tag">📅 Google</span>' : ''}</span>
+                        <span class="cv-dur">${getTaskPlannedMinutes(t) ? formatDuration(getTaskPlannedMinutes(t)) : ''}</span></li>`;
+
+                box.innerHTML = `
+                    <div class="cal-view">
+                        <div class="cal-head">
+                            <button type="button" class="btn btn-secondary btn-small" data-cal="prev">‹</button>
+                            <div class="cal-month">${y} 年 ${m} 月</div>
+                            <button type="button" class="btn btn-secondary btn-small" data-cal="next">›</button>
+                            <button type="button" class="btn btn-secondary btn-small" data-cal="today">今天</button>
+                        </div>
+                        <div class="cal-grid">${['一', '二', '三', '四', '五', '六', '日'].map(w => `<div class="cal-wd">${w}</div>`).join('')}${grid}</div>
+                        <div class="cal-legend"><i style="--c:#94a3b8"></i>已建立　<i class="est" style="--c:#94a3b8"></i>預估（迴圈尚未建立）</div>
+                        <div class="cal-detail">
+                            <div class="cal-detail-head">${selLabel}${sel === todayStr ? '・今天' : ''}<span>${selMins ? `未完成預定 ${formatDuration(selMins)}` : ''}</span></div>
+                            <ul class="cv-list">${selReal.map(t => row(t, false)).join('')}${selEst.map(p => row(p.task, true, p.n)).join('')}</ul>
+                            ${!selReal.length && !selEst.length ? '<div class="cv-empty">這天沒有任務</div>' : ''}
+                            ${selEst.length ? '<div class="cv-sub">🔮 預估：依目前迴圈設定推算（假設每次都在預定日完成），實際建立日可能因提前或延後完成而不同；點擊可編輯目前這一次。</div>' : ''}
+                        </div>
+                    </div>`;
+
+                box.querySelectorAll('[data-cal]').forEach(b => b.addEventListener('click', () => {
+                    const act = b.dataset.cal;
+                    if (act === 'today') { this.calendarSelected = todayStr; this.calendarMonth = todayStr.slice(0, 7); }
+                    else {
+                        const d = new Date(y, m - 1 + (act === 'next' ? 1 : -1), 1);
+                        this.calendarMonth = localDateStr(d).slice(0, 7);
+                    }
+                    this.renderCalendarView(box);
+                }));
+                box.querySelectorAll('.cal-cell').forEach(c => c.addEventListener('click', () => {
+                    this.calendarSelected = c.dataset.date;
+                    if (c.dataset.date.slice(0, 7) !== this.calendarMonth) this.calendarMonth = c.dataset.date.slice(0, 7);
+                    this.renderCalendarView(box);
+                }));
+                box.querySelectorAll('.cv-row[data-id]').forEach(el => el.addEventListener('click', () => this.openEditModal(el.dataset.id)));
+            }
+
+            // ===== 每週內重複：表單星期選擇（v8.0.0）=====
+            getPickedWeekdays() {
+                return [...document.querySelectorAll('#recurWeekdays .weekday-chip.active')].map(b => Number(b.dataset.dow)).sort((a, b) => a - b);
+            }
+            setPickedWeekdays(days) {
+                const set = new Set(days || []);
+                document.querySelectorAll('#recurWeekdays .weekday-chip').forEach(b => b.classList.toggle('active', set.has(Number(b.dataset.dow))));
+                this.updateWeekdayPickerState();
+            }
+            updateWeekdayPickerState() {
+                const isGroup = document.getElementById('taskGroup').checked;
+                document.querySelectorAll('#recurWeekdays .weekday-chip').forEach(b => { b.disabled = isGroup; });
+                const hint = document.getElementById('recurWeekdayHint');
+                if (hint) hint.dataset.group = isGroup ? '1' : '';
+                if (hint) hint.textContent = isGroup ? '群組任務依群組順序輪流，不適用「每週內重複」。'
+                    : '點選星期後，只在這些星期出現；「迴圈間隔」當作週期（7＝每週、14＝每兩週）。例：週期 7 天、選一和三 → 週三完成後建立到下週一。';
+            }
+
             updateDate() {
                 const dateDisplay = document.getElementById('dateDisplay');
                 const versionDisplay = document.getElementById('versionDisplay');
@@ -4889,15 +5687,15 @@
             }
 
             updateSortModeButton() {
-                const text = document.getElementById('sortModeText');
-                if (!text) return;
-                text.textContent = this.sortMode === 'drag' ? '拖曳排序' : '固定排序';
+                const btn = document.getElementById('toggleSortBtn');
+                if (!btn) return;
+                btn.setAttribute('aria-checked', this.sortMode === 'drag' ? 'true' : 'false');   // 開＝拖曳排序，關＝固定排序
             }
 
             updateShowCompletedButton() {
-                const text = document.getElementById('completedVisibilityText');
-                if (!text) return;
-                text.textContent = this.showCompleted ? '顯示已完成' : '隱藏已完成';
+                const btn = document.getElementById('toggleCompletedBtn');
+                if (!btn) return;
+                btn.setAttribute('aria-checked', this.showCompleted ? 'false' : 'true');   // 開＝隱藏已完成
             }
 
             // ===== 工具函數 =====
@@ -4977,6 +5775,7 @@
                     document.getElementById('actualTimeGroup').style.display = 'none';
                     document.getElementById('nextStepNotesGroup').style.display = 'none';
                     document.getElementById('taskRecurring').checked = false;
+                    this.setPickedWeekdays([]);
                     document.getElementById('recurringOptions').style.display = 'none';
                     document.getElementById('taskIntensity').checked = false;
                     document.getElementById('intensityOptions').style.display = 'none';
@@ -5013,6 +5812,7 @@
                         document.getElementById('recurringOptions').style.display = 'block';
                         document.getElementById('taskGroup').checked = true;
                         document.getElementById('groupOptions').style.display = 'block';
+                        this.updateWeekdayPickerState();
                         this.updateGroupSelect(null);
                         const gs = document.getElementById('groupSelect');
                         gs.value = viewGroup;
@@ -5064,10 +5864,11 @@
 
                 // 迴圈雙向推算：截止日期 ↔ 重複次數
                 let _recurringCalcLock = false;
-                const getRecurringBase = () => ({
-                    startDate: document.getElementById('taskDate').value,
-                    interval: parseInt(document.getElementById('recurringDays').value) || 1
-                });
+                const getRecurringBase = () => {
+                    const interval = parseInt(document.getElementById('recurringDays').value) || 1;
+                    const weekdays = document.getElementById('taskGroup').checked ? [] : this.getPickedWeekdays();
+                    return { startDate: document.getElementById('taskDate').value, interval, rec: { interval, weekdays } };
+                };
                 const daysDiff = (a, b) => {
                     if (!a || !b) return null;
                     const da = new Date(a + 'T00:00:00'), db = new Date(b + 'T00:00:00');
@@ -5075,22 +5876,22 @@
                 };
                 const syncUntilDateFromCount = () => {
                     if (_recurringCalcLock) return;
-                    const { startDate, interval } = getRecurringBase();
+                    const { startDate, rec } = getRecurringBase();
                     const count = parseInt(document.getElementById('recurringCount').value);
                     if (!startDate || !count || count < 1) return;
                     _recurringCalcLock = true;
-                    document.getElementById('recurringUntilDate').value = addDaysToDate(startDate, interval * (count - 1));
+                    document.getElementById('recurringUntilDate').value = advanceRecurDate(startDate, rec, count - 1);
                     _recurringCalcLock = false;
                 };
                 const syncCountFromUntilDate = () => {
                     if (_recurringCalcLock) return;
-                    const { startDate, interval } = getRecurringBase();
+                    const { startDate, rec } = getRecurringBase();
                     const untilDate = document.getElementById('recurringUntilDate').value;
                     if (!startDate || !untilDate) return;
                     const diff = daysDiff(startDate, untilDate);
                     if (diff === null || diff < 0) return;
                     _recurringCalcLock = true;
-                    document.getElementById('recurringCount').value = Math.floor(diff / interval) + 1;
+                    document.getElementById('recurringCount').value = countRecurUntil(startDate, rec, untilDate);
                     _recurringCalcLock = false;
                 };
                 const resyncRecurringFields = () => {
@@ -5101,6 +5902,16 @@
                 document.getElementById('recurringUntilDate').addEventListener('change', syncCountFromUntilDate);
                 document.getElementById('recurringDays').addEventListener('input', resyncRecurringFields);
                 document.getElementById('taskDate').addEventListener('change', resyncRecurringFields);
+                // 每週內重複：點選星期（v8.0.0）；有勾星期且間隔不到 7 天時，自動改成 7（每週）
+                document.querySelectorAll('#recurWeekdays .weekday-chip').forEach(chip => {
+                    chip.addEventListener('click', () => {
+                        chip.classList.toggle('active');
+                        const daysInput = document.getElementById('recurringDays');
+                        if (this.getPickedWeekdays().length && (parseInt(daysInput.value) || 1) < 7) daysInput.value = 7;
+                        resyncRecurringFields();
+                    });
+                });
+                document.getElementById('taskGroup').addEventListener('change', () => { this.updateWeekdayPickerState(); resyncRecurringFields(); });
 
                 // 任務群組選項
                 document.getElementById('taskGroup').addEventListener('change', (e) => {
@@ -5384,11 +6195,15 @@
                     document.getElementById('recurringDays').value = task.recurring.interval || 1;
                     document.getElementById('recurringUntilDate').value = task.recurring.untilDate || '';
                     document.getElementById('recurringCount').value = task.recurring.repeatCount || '';
+                    this.setPickedWeekdays(recurWeekdays(task.recurring));
+                } else {
+                    this.setPickedWeekdays([]);
                 }
                 document.getElementById('recurringMode').value = getRecurMode(task);
 
                 document.getElementById('taskGroup').checked = !!task.groupId;
                 document.getElementById('groupOptions').style.display = task.groupId ? 'block' : 'none';
+                this.updateWeekdayPickerState();
 
                 // 更新群組選擇
                 this.updateGroupSelect(task.groupId);
@@ -5635,13 +6450,13 @@
                         nextDate = addDaysToDate(completedTask.date, interval);
                     }
                 } else if (mode === 'auto') {
-                    // 獨立迴圈任務・依完成日順延：下一次 = 完成日 + interval
-                    nextDate = addDaysToDate(doneDate, interval);
+                    // 獨立迴圈任務・依完成日順延：下一次 = 完成日 + interval（有勾星期 → 完成日之後第一個勾選的星期）
+                    nextDate = nextRecurDate(doneDate, completedTask.recurring);
                 } else {
                     // 獨立迴圈任務・依原定排程：下一次 = 排程基準日（不受這次延後影響）+ interval
                     const base = completedTask.recurring.anchorDate
                         || (completedTask.date && completedTask.date !== '9999-12-31' ? completedTask.date : localDateStr());
-                    nextDate = addDaysToDate(base, interval);
+                    nextDate = nextRecurDate(base, completedTask.recurring);
                 }
 
                 // 暫停中完成：下一次維持不限期（並讓「上次輪到」交棒給群組下一個），不受結束日期檢查影響
@@ -5729,7 +6544,9 @@
                 if (!task.date || task.date === '9999-12-31') return;
                 const remaining = rec.repeatCount - ((rec.completedCount || 0) + 1); // 本次之後還要做幾次
                 if (remaining < 0) return;
-                rec.untilDate = addDaysToDate(task.date, rec.interval * remaining);
+                rec.untilDate = (!task.groupId && recurWeekdays(rec).length)
+                    ? advanceRecurDate(task.date, rec, remaining)
+                    : addDaysToDate(task.date, rec.interval * remaining);
             }
 
             completeNonContinuousTask(taskId) {
@@ -7249,7 +8066,8 @@
                         untilDate: document.getElementById('recurringUntilDate').value || null,
                         repeatCount: parseInt(document.getElementById('recurringCount').value) || null,
                         mode: document.getElementById('recurringMode').value === 'auto' ? 'auto' : 'fixed',
-                        anchorDate: (date && date !== '9999-12-31') ? date : null
+                        anchorDate: (date && date !== '9999-12-31') ? date : null,
+                        weekdays: (!document.getElementById('taskGroup').checked && this.getPickedWeekdays().length) ? this.getPickedWeekdays() : null
                     };
                 }
 

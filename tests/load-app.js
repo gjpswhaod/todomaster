@@ -44,6 +44,8 @@ const EXPORTS = [
     'stableStringify', 'taskContentFp', 'stateDigest', 'normalizeState', 'normalizeCatalog',
     'mergeCatalog', 'resolveTagName', 'applyTagRenames',
     'getRecurMode', 'nextRecurringId', 'diffTaskFields',
+    'recurWeekdays', 'nextRecurDate', 'advanceRecurDate', 'countRecurUntil', 'recurLabel',
+    'gcalTaskId', 'gcalEventToFields', 'gcalPlainText',
     'detectConflicts', 'mergeFieldValue', 'mergeTaskFields', 'resolveConflictTask', 'mergeStates',
     'encodeSetupPayload', 'decodeSetupPayload'
 ];
