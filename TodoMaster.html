@@ -25,7 +25,7 @@
         });
       }
     </script>
-    <title>TodoMaster v8.0.0 -任務管理工具</title>
+    <title>TodoMaster v8.0.1 -任務管理工具</title>
     <style>
         * {
             margin: 0;
@@ -166,6 +166,10 @@
         .cv-row:hover { background: var(--bg-tertiary); }
         .cv-row.done .cv-title { text-decoration: line-through; opacity: 0.6; }
         .cv-row.est { border: 1px dashed var(--text-secondary); background: transparent; }
+        .cv-handle { cursor: grab; touch-action: none; user-select: none; color: var(--text-secondary); padding: 4px 6px; margin: -4px 0 -4px -6px; font-size: 1rem; line-height: 1; }
+        .cv-row.cv-dragging { opacity: 0.35; }
+        .cv-ghost { position: fixed; z-index: 3000; pointer-events: none; opacity: 0.92; box-shadow: 0 8px 24px rgba(0,0,0,0.5); margin: 0; list-style: none; }
+        .cal-cell.drop-hover { border-color: #34d399; background: var(--bg-tertiary); }
         .cv-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
         .cv-time { font-family: monospace; color: var(--text-secondary); min-width: 92px; }
         .cv-title { flex: 1; min-width: 0; overflow-wrap: anywhere; }
@@ -202,6 +206,9 @@
             .cal-titles, .cal-mins { display: none; }
             .cv-time { min-width: 76px; font-size: 0.8rem; }
         }
+        /* 視圖按鈕兩兩並排（v8.0.1） */
+        .view-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 6px; }
+        .view-grid .filter-item { margin: 0; justify-content: center; width: 100%; font-family: inherit; }
         /* 側欄開關（v8.0.0）：拖曳排序／隱藏已完成，點整列切換 */
         .switch-item { width: 100%; background: none; color: inherit; text-align: left; font-family: inherit; }
         .side-switch { margin-left: auto; position: relative; width: 36px; height: 20px; flex-shrink: 0; border-radius: 20px; background: var(--bg-tertiary); border: 1px solid var(--border-color, #888); transition: background .2s; }
@@ -1356,7 +1363,7 @@
 </style>
 
     <script>
-        const APP_VERSION = 'v8.0.0';
+        const APP_VERSION = 'v8.0.1';
         const BACKUP_PICKER_ID = 'todomaster-backups';   // showDirectoryPicker 的 id：只讓選取視窗停在上次用過的位置，不保存資料夾授權（每次仍會詢問）
         const BLOCK_MINUTES = 30;
         // 預設 4 個分類；名稱/emoji/顏色/順序可自訂，也可新增分類（key = c_xxx），皆存在 catalog.categories，
@@ -1678,18 +1685,12 @@
 
             <div class="sidebar-section">
                 <div class="sidebar-section-title">視圖</div>
-                <button class="filter-item active" data-filter="all">
-                    <span class="filter-icon">📊</span>
-                    所有任務
-                </button>
-                <button class="filter-item" data-filter="clock">
-                    <span class="filter-icon">🕐</span>
-                    時鐘視圖
-                </button>
-                <button class="filter-item" data-filter="calendar">
-                    <span class="filter-icon">📅</span>
-                    日曆視圖
-                </button>
+                <div class="view-grid">
+                    <button class="filter-item active" data-filter="all"><span class="filter-icon">📋</span>所有</button>
+                    <button class="filter-item" id="statsBtn"><span class="filter-icon">📊</span>統計</button>
+                    <button class="filter-item" data-filter="clock"><span class="filter-icon">🕐</span>時鐘</button>
+                    <button class="filter-item" data-filter="calendar"><span class="filter-icon">📅</span>日曆</button>
+                </div>
                 <button class="filter-item switch-item" id="toggleSortBtn" role="switch" aria-checked="true" title="開：拖曳排序／關：固定排序">
                     <span class="filter-icon">🔄</span>
                     <span id="sortModeText">拖曳排序</span>
@@ -1699,14 +1700,6 @@
                     <span class="filter-icon">✅</span>
                     <span id="completedVisibilityText">隱藏已完成</span>
                     <span class="side-switch" aria-hidden="true"></span>
-                </button>
-                <button class="filter-item" id="statsBtn">
-                    <span class="filter-icon">📊</span>
-                    時間統計
-                </button>
-                <button class="filter-item" id="compressBtn">
-                    <span class="filter-icon">📦</span>
-                    壓縮任務
                 </button>
             </div>
 
@@ -3445,13 +3438,16 @@
                     this.setupSyncListeners();
                     this.setupAiListeners();
                     this.updateUI();
+                    this._autoCompressQuiet();   // 完成超過 3 天的任務自動壓縮（v8.0.1）
                     this.setupGcalListeners();
                     this.updateDate();
                     setInterval(() => this.updateDate(), 60000);
                     setInterval(() => this._placeNowLine(), 60000);
+                    setInterval(() => this._autoCompressQuiet(), 3600000);
+                    document.addEventListener('visibilitychange', () => { if (!document.hidden) this._autoCompressQuiet(); });
                     // 時鐘視圖：每 30 秒更新指針與剩餘時間（只在顯示時鐘視圖且沒開視窗時）
                     setInterval(() => {
-                        if (this.currentFilter === 'clock' && !document.hidden && !document.querySelector('.modal.active')) this.renderClockView(document.getElementById('specialView'));
+                        if (this.currentFilter === 'clock' && !document.hidden && !document.querySelector('.modal.active, .cv-ghost')) this.renderClockView(document.getElementById('specialView'));
                     }, 30000);
                     this._consumeSetupHash();
                     this.cloud.start();
@@ -5407,7 +5403,7 @@
 
             // 某天的實際任務（不含子任務、暫存、不限期）；遵守「隱藏已完成」
             _tasksOnDate(dateStr) {
-                return this.tasks.filter(t => !isSubtask(t) && t.date === dateStr && (this.showCompleted || !t.completed));
+                return this.tasks.filter(t => !isSubtask(t) && !t.compressed && t.date === dateStr && (this.showCompleted || !t.completed));
             }
 
             _taskColor(task) {
@@ -5496,8 +5492,8 @@
 
                 const row = (s) => {
                     const t = s ? s.t : null;
-                    return `<li class="cv-row${t.completed ? ' done' : ''}" data-id="${escapeHtml(t.id)}">
-                        <span class="cv-dot" style="background:${this._taskColor(t)}"></span>
+                    return `<li class="cv-row${t.completed ? ' done' : ''}" data-id="${escapeHtml(t.id)}" data-time="${escapeHtml(t.time || '')}" data-dur="${getTaskPlannedMinutes(t)}">
+                        ${this._viewHandle(t, false)}<span class="cv-dot" style="background:${this._taskColor(t)}"></span>
                         <span class="cv-time">${s.start !== null ? `${t.time}${s.dur ? `–${minutesToTime(s.start + s.dur)}` : ''}` : '—'}</span>
                         <span class="cv-title">${t.completed ? '✓ ' : ''}${escapeHtml(t.title)}</span>
                         <span class="cv-dur">${s.dur ? formatDuration(s.dur) : ''}</span></li>`;
@@ -5517,10 +5513,12 @@
                             ${nextUp ? `<div class="cv-next">${nextUp.start <= nowMin ? '▶ 進行中' : '⏭ 下一個'}：${escapeHtml(nextUp.t.title)}（${nextUp.t.time}${nextUp.start > nowMin ? `，${hm(nextUp.start - nowMin)}後` : ''}）</div>` : ''}
                         </div>
                         <div class="clock-faces">${face(0)}${face(1)}</div>
-                        <ul class="cv-list">${timed.map(row).join('') || '<li class="cv-empty">今天沒有指定時刻的任務</li>'}</ul>
-                        ${untimed.length ? `<div class="cv-sub">未指定時刻（不畫在鐘面上）</div><ul class="cv-list">${untimed.map(t => row({ t, start: null, dur: getTaskPlannedMinutes(t) })).join('')}</ul>` : ''}
+                        <ul class="cv-list" data-drop="timed">${timed.map(row).join('') || '<li class="cv-empty">今天沒有指定時刻的任務</li>'}</ul>
+                        ${untimed.length || this.sortMode === 'drag' ? `<div class="cv-sub">未指定時刻（不畫在鐘面上）${this.sortMode === 'drag' ? '・拖到這裡可清除時刻' : ''}</div><ul class="cv-list" data-drop="untimed">${untimed.map(t => row({ t, start: null, dur: getTaskPlannedMinutes(t) })).join('') || '<li class="cv-empty">（無）</li>'}</ul>` : ''}
+                        ${this.sortMode === 'drag' ? '<div class="cv-sub">↕️ 拖曳排序已開啟：按住 ⋮⋮ 拖曳，時刻依前一項「時刻＋預計時間」重新推算，鐘面會跟著更新</div>' : ''}
                     </div>`;
                 box.querySelectorAll('[data-id]').forEach(el => el.addEventListener('click', () => this.openEditModal(el.dataset.id)));
+                this._bindViewDrag(box);
             }
 
             // --- 日曆視圖：月曆＋點選某天看任務；含「尚未建立、但依迴圈推算當天會建立」的預估任務 ---
@@ -5611,13 +5609,17 @@
                 }
 
                 const sel = this.calendarSelected;
-                const selReal = this._tasksOnDate(sel).sort((a, b) => (timeToMinutes(a.time) ?? -1) - (timeToMinutes(b.time) ?? -1));
-                const selEst = (proj.get(sel) || []).sort((a, b) => (timeToMinutes(a.task.time) ?? -1) - (timeToMinutes(b.task.time) ?? -1));
+                const selReal = this._tasksOnDate(sel);
+                const selEst = proj.get(sel) || [];
+                // 已建立與預估的任務一起依時刻排序（未指定時刻者在前；同時刻維持「已建立在前」）
+                const selItems = [...selReal.map(t => ({ t, est: false })), ...selEst.map(p => ({ t: p.task, est: true, n: p.n }))]
+                    .map((x, i) => ({ ...x, i }))
+                    .sort((a, b) => ((timeToMinutes(a.t.time) ?? -1) - (timeToMinutes(b.t.time) ?? -1)) || (a.i - b.i));
                 const selMins = selReal.filter(t => !t.completed).reduce((s, t) => s + getTaskPlannedMinutes(t), 0) + selEst.reduce((s, p) => s + getTaskPlannedMinutes(p.task), 0);
                 const [sy, sm, sd] = sel.split('-').map(Number);
                 const selLabel = `${sm}月${sd}日（週${WEEKDAY_LABELS[new Date(sy, sm - 1, sd).getDay()]}）`;
-                const row = (t, est, n) => `<li class="cv-row${t.completed && !est ? ' done' : ''}${est ? ' est' : ''}" data-id="${escapeHtml(t.id)}">
-                        <span class="cv-dot" style="background:${this._taskColor(t)}"></span>
+                const row = (t, est, n) => `<li class="cv-row${t.completed && !est ? ' done' : ''}${est ? ' est' : ''}" data-id="${escapeHtml(t.id)}" data-time="${escapeHtml(t.time || '')}" data-dur="${getTaskPlannedMinutes(t)}">
+                        ${this._viewHandle(t, est)}<span class="cv-dot" style="background:${this._taskColor(t)}"></span>
                         <span class="cv-time">${t.time || '—'}</span>
                         <span class="cv-title">${t.completed && !est ? '✓ ' : ''}${escapeHtml(t.title)}${est ? ` <span class="cal-est-tag">🔮 預估·第${n}次</span>` : ''}${t.gcal ? ' <span class="cal-est-tag">📅 Google</span>' : ''}</span>
                         <span class="cv-dur">${getTaskPlannedMinutes(t) ? formatDuration(getTaskPlannedMinutes(t)) : ''}</span></li>`;
@@ -5634,8 +5636,9 @@
                         <div class="cal-legend"><i style="--c:#94a3b8"></i>已建立　<i class="est" style="--c:#94a3b8"></i>預估（迴圈尚未建立）</div>
                         <div class="cal-detail">
                             <div class="cal-detail-head">${selLabel}${sel === todayStr ? '・今天' : ''}<span>${selMins ? `未完成預定 ${formatDuration(selMins)}` : ''}</span></div>
-                            <ul class="cv-list">${selReal.map(t => row(t, false)).join('')}${selEst.map(p => row(p.task, true, p.n)).join('')}</ul>
+                            <ul class="cv-list" data-drop="day">${selItems.map(x => row(x.t, x.est, x.n)).join('')}</ul>
                             ${!selReal.length && !selEst.length ? '<div class="cv-empty">這天沒有任務</div>' : ''}
+                            ${this.sortMode === 'drag' && selReal.length ? '<div class="cv-sub">↕️ 拖曳排序已開啟：按住 ⋮⋮ 在清單內上下拖曳可改時刻，拖到上方某一天可改日期</div>' : ''}
                             ${selEst.length ? '<div class="cv-sub">🔮 預估：依目前迴圈設定推算（假設每次都在預定日完成），實際建立日可能因提前或延後完成而不同；點擊可編輯目前這一次。</div>' : ''}
                         </div>
                     </div>`;
@@ -5655,6 +5658,124 @@
                     this.renderCalendarView(box);
                 }));
                 box.querySelectorAll('.cv-row[data-id]').forEach(el => el.addEventListener('click', () => this.openEditModal(el.dataset.id)));
+                this._bindViewDrag(box);
+            }
+
+            // ===== 時鐘／日曆視圖的拖曳（v8.0.1）：「拖曳排序」開啟時，按住 ⋮⋮ 拖曳（滑鼠與觸控皆可）=====
+            _viewHandle(task, est) {
+                if (this.sortMode !== 'drag' || est || task.compressed) return '';
+                return '<span class="cv-handle" title="拖曳：改時刻／拖到日曆某天改日期" aria-label="拖曳">⋮⋮</span>';
+            }
+
+            _bindViewDrag(box) {
+                if (this.sortMode !== 'drag') return;
+                box.querySelectorAll('.cv-handle').forEach(h => {
+                    h.addEventListener('click', e => e.stopPropagation());
+                    h.addEventListener('pointerdown', e => this._startViewDrag(e, h.closest('.cv-row')));
+                });
+            }
+
+            _startViewDrag(e, row) {
+                if (!row || (e.button !== undefined && e.button !== 0)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const id = row.dataset.id;
+                const rect = row.getBoundingClientRect();
+                const dx = e.clientX - rect.left, dy = e.clientY - rect.top;
+                const ghost = row.cloneNode(true);
+                ghost.classList.add('cv-ghost');
+                Object.assign(ghost.style, { width: rect.width + 'px', left: rect.left + 'px', top: rect.top + 'px' });
+                document.body.appendChild(ghost);
+                row.classList.add('cv-dragging');
+                const scroller = row.closest('.task-area');
+                let cell = null, moved = false, lastY = e.clientY, raf = 0;
+                const autoScroll = () => {
+                    raf = 0;
+                    if (!scroller) return;
+                    const r = scroller.getBoundingClientRect();
+                    const step = lastY < r.top + 50 ? -12 : lastY > r.bottom - 50 ? 12 : 0;
+                    if (step) { scroller.scrollTop += step; raf = requestAnimationFrame(autoScroll); }
+                };
+                const move = ev => {
+                    lastY = ev.clientY;
+                    ghost.style.left = (ev.clientX - dx) + 'px';
+                    ghost.style.top = (ev.clientY - dy) + 'px';
+                    if (!raf) raf = requestAnimationFrame(autoScroll);
+                    const el = document.elementFromPoint(ev.clientX, ev.clientY);
+                    const c = el ? el.closest('.cal-cell') : null;
+                    if (cell && cell !== c) cell.classList.remove('drop-hover');
+                    cell = c;
+                    if (cell) { cell.classList.add('drop-hover'); return; }
+                    const list = el ? el.closest('.cv-list[data-drop]') : null;
+                    if (!list) return;
+                    const target = el.closest('.cv-row');
+                    if (target && target !== row && target.parentElement === list) {
+                        const r = target.getBoundingClientRect();
+                        const before = ev.clientY < r.top + r.height / 2 ? target : target.nextSibling;
+                        if (before !== row && row.nextSibling !== before) { list.insertBefore(row, before); moved = true; }
+                    } else if (!target && list !== row.parentElement) {
+                        list.querySelector('.cv-empty')?.remove();
+                        list.appendChild(row);
+                        moved = true;
+                    }
+                };
+                const end = (ev, cancelled) => {
+                    window.removeEventListener('pointermove', move);
+                    window.removeEventListener('pointerup', onUp);
+                    window.removeEventListener('pointercancel', onCancel);
+                    if (raf) cancelAnimationFrame(raf);
+                    ghost.remove();
+                    row.classList.remove('cv-dragging');
+                    if (cell) cell.classList.remove('drop-hover');
+                    if (cancelled) { this.renderTasks(); return; }
+                    if (cell) this._viewDropDate(id, cell.dataset.date);
+                    else if (moved) this._viewDropList(id, row);
+                };
+                const onUp = ev => end(ev, false);
+                const onCancel = ev => end(ev, true);
+                window.addEventListener('pointermove', move);
+                window.addEventListener('pointerup', onUp);
+                window.addEventListener('pointercancel', onCancel);
+            }
+
+            // 拖到日曆某一天：改日期（保留時刻，並連動調整原本連續的任務）
+            _viewDropDate(id, date) {
+                const task = this.getTaskById(id);
+                if (!task || !date) return this.renderTasks();
+                if (task.date !== date) {
+                    const oldDate = task.date, oldTime = task.time || null;
+                    this.updateTask(id, { date });
+                    this.reflowOnMove(task, oldDate, oldTime, task.time || null);
+                    if (task.groupId && getRecurMode(task) === 'auto') this.updateGroupTaskDates(task.groupId, task.id);
+                    else if (!task.groupId) this.recomputeRecurringUntil(task);
+                    this.saveToStorage();
+                    this.showNotification(`📅 已移到 ${date}`);
+                }
+                this.updateUI();
+            }
+
+            // 在清單內拖曳：依落點前一項的「時刻＋預計時間」推算新時刻（落在最前面 → 下一項時刻－本項預計時間）；拖進「未指定時刻」→ 清除時刻
+            _viewDropList(id, row) {
+                const task = this.getTaskById(id);
+                if (!task) return this.renderTasks();
+                const kind = row.parentElement && row.parentElement.dataset.drop;
+                const oldTime = task.time || null;
+                let newTime = oldTime;
+                if (kind === 'untimed') newTime = null;
+                else {
+                    const timedSib = dir => { let n = row[dir]; while (n && !(n.dataset && n.dataset.time)) n = n[dir]; return n; };
+                    const prev = timedSib('previousElementSibling');
+                    const next = timedSib('nextElementSibling');
+                    if (prev) newTime = minutesToTime(timeToMinutes(prev.dataset.time) + Number(prev.dataset.dur || 0));
+                    else if (next) newTime = minutesToTime(Math.max(0, timeToMinutes(next.dataset.time) - getTaskPlannedMinutes(task)));
+                }
+                if (newTime !== oldTime) {
+                    this.updateTask(id, { time: newTime });
+                    this.reflowOnMove(task, task.date, oldTime, newTime);
+                    this.saveToStorage();
+                    this.showNotification(newTime ? `🕐 時刻改為 ${newTime}` : '🕐 已清除時刻');
+                }
+                this.updateUI();
             }
 
             // ===== 每週內重複：表單星期選擇（v8.0.0）=====
@@ -5979,18 +6100,6 @@
 
                         if (targetId === 'statsBtn') {
                             this.openStatsModal();
-                            return;
-                        }
-
-                        if (targetId === 'compressBtn') {
-                            const count = this.tasks.filter(t => t.completed && !t.compressed && !isSubtask(t)).length;
-                            if (count === 0) {
-                                const removed = this.purgeOldData();
-                                if (removed > 0) this.updateUI();
-                                this.showNotification(removed > 0 ? `🧹 已清除 ${removed} 筆逾30天舊資料` : '沒有可壓縮的已完成任務');
-                            } else if (confirm(`壓縮 ${count} 個已完成任務？\n將清除詳細資料，只保留名稱、分類、時間收支與精準度。`)) {
-                                this.compressCompletedTasks();
-                            }
                             return;
                         }
 
@@ -6641,10 +6750,29 @@
                 return removedTasks;
             }
 
-            compressCompletedTasks() {
+            _autoCompressQuiet() {
+                try { this.autoCompress(); } catch (e) { console.error('自動壓縮失敗:', e); }
+            }
+
+            // v8.0.1：取消手動壓縮鈕，改為自動壓縮「完成超過 3 天」的任務（開 App、回到前景、每小時檢查）
+            _compressCutoffStr() {
+                return addDaysToDate(localDateStr(), -3);   // 完成日 < 今天-3 天 → 完成已超過 3 天
+            }
+            _completedDateOf(task) {
+                return task.completedDate || (task.completedAt ? localDateStr(new Date(task.completedAt)) : '');
+            }
+            autoCompress() {
+                const cutoff = this._compressCutoffStr();
+                const due = t => t.completed && !t.compressed && !isSubtask(t) && this._completedDateOf(t) && this._completedDateOf(t) < cutoff;
+                if (!this.tasks.some(due)) return 0;
+                return this.compressCompletedTasks(due);
+            }
+
+            compressCompletedTasks(shouldCompress = null) {
                 let count = 0;
                 this.tasks = this.tasks.map(task => {
                     if (!task.completed || task.compressed || isSubtask(task)) return task;
+                    if (shouldCompress && !shouldCompress(task)) return task;
                     count++;
 
                     // 預計時間（分鐘）
@@ -6666,14 +6794,14 @@
                         compressed:    true,
                         completedDate: task.completedDate || task.completedAt?.split('T')[0] || '',
                         timeBalance,
+                        ...(task.gcal ? { gcal: task.gcal } : {}),   // 保留日曆對應，避免日曆同步把它當成新活動
                     };
                 });
 
-                const removed = this.purgeOldData();
-
+                this.purgeOldData();
                 this.saveToStorage();
                 this.updateUI();
-                this.showNotification(`📦 已壓縮 ${count} 個已完成任務${removed > 0 ? `，並清除 ${removed} 筆逾30天舊資料` : ''}`);
+                return count;
             }
 
             openStatsModal() {
